@@ -1,0 +1,10 @@
+[package]
+name = "i-shell"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-trait = "0.1.92"
+rustyline = "18.0.1"
+thiserror = "2.0.20"
+tokio = "1.53.1"
