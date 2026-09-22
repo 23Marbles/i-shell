@@ -1,44 +1,93 @@
 use crate::codec::{WireDecode, WireEncode, WireType};
 
-macro_rules! impl_list {
-    ( $( $type:ty, fn decode() { $decode:expr }, fn decode() { $decode:expr } ),* ) => {};
-}
-
-#[derive(Debug)]
-#[repr(u32)]
-enum TypeIds {
-    String = 1,
-}
-
 #[derive(Debug, thiserror::Error)]
 #[error("`{got}` is not a valid enum variant")]
-struct EnumFromU32Err {
-    got: u32,
+pub struct EnumFromU32Err {
+    pub got: u32,
 }
 
-impl TryFrom<u32> for TypeIds {
-    type Error = EnumFromU32Err;
-
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        match value {
-            1 => Ok(Self::String),
-            _ => Err(EnumFromU32Err { got: value }),
+macro_rules! impl_list {
+    (
+        $(
+            $name:ident => $id:literal = $type:ty,
+            fn decode($buf:ident) { $decode:expr },
+            fn encode($this:ident, $buf2:ident) { $encode:expr }
+        ),* $(,)?
+    ) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[repr(u32)]
+        pub enum TypeIds {
+            $(
+                $name = $id,
+            )*
         }
-    }
+
+        impl TryFrom<u32> for TypeIds {
+            type Error = EnumFromU32Err;
+
+            fn try_from(value: u32) -> Result<Self, Self::Error> {
+                match value {
+                    $(
+                        $id => Ok(Self::$name),
+                    )*
+                    _ => Err(EnumFromU32Err { got: value }),
+                }
+            }
+        }
+
+        $(
+            impl WireType for $type {
+                const TYPE_ID: TypeIds = TypeIds::$name;
+            }
+
+            impl WireDecode for $type {
+                fn decode_body(
+                    $buf: &mut impl super::WireRead
+                ) -> Result<Self, super::DecodeErr> {
+                    $decode
+                }
+            }
+
+            impl WireEncode for $type {
+                fn encode_body(
+                    &$this,
+                    $buf2: &mut impl super::WireWrite
+                ) {
+                    $encode
+                }
+            }
+        )*
+    };
 }
 
-impl WireType for String {
-    const TYPE_ID: u32 = TypeIds::String as u32;
-}
+impl_list! {
+    String => 1 = String,
 
-impl WireDecode for String {
-    fn decode_body(buf: &mut impl super::WireRead) -> Result<Self, super::DecodeErr> {
+    fn decode(buf) {
         buf.string()
-    }
-}
+    },
 
-impl WireEncode for String {
-    fn encode_body(&self, buf: &mut impl super::WireWrite) {
-        buf.string(self);
-    }
+    fn encode(self, buf) {
+        buf.string(self)
+    },
+
+    U32 => 2 = u32,
+
+    fn decode(buf) {
+        buf.u32()
+    },
+
+    fn encode(self, buf) {
+        buf.u32(*self)
+    },
+
+    Bytes => 3 = Vec<u8>,
+
+    fn decode(buf) {
+        buf.bytes()
+    },
+
+    fn encode(self, buf) {
+        buf.bytes(self)
+    },
 }

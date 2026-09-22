@@ -2,10 +2,12 @@ use std::io::Read;
 
 use thiserror::Error;
 
+use crate::codec::impls::{EnumFromU32Err, TypeIds};
+
 mod impls;
 
 pub trait WireType {
-    const TYPE_ID: u32;
+    const TYPE_ID: impls::TypeIds;
 }
 
 #[derive(Debug, Error)]
@@ -16,8 +18,11 @@ pub enum DecodeErr {
     #[error("expected {expected} bytes, got {got}")]
     NotEnoughBytes { expected: usize, got: usize },
 
-    #[error("expected type with id `{expected}`, got type id `{got}`")]
-    InvalidType { expected: u32, got: u32 },
+    #[error("expected type with id `{expected:?}`, got type id `{got:?}`")]
+    UnexpectedType { expected: TypeIds, got: TypeIds },
+
+    #[error("`{}` is not a recognized type", .0.got)]
+    InvalidType(#[from] EnumFromU32Err),
 
     #[error("decode did not take all bytes from `body`, leaving `{0}` bytes behind")]
     TrailingBytes(usize),
@@ -101,7 +106,7 @@ pub fn encode<T: WireEncode>(value: &T) -> Vec<u8> {
 
     let mut frame = Vec::with_capacity(8 + body.len());
 
-    frame.extend_from_slice(&T::TYPE_ID.to_be_bytes());
+    frame.extend_from_slice(&(T::TYPE_ID as u32).to_be_bytes());
     frame.extend_from_slice(&(body.len() as u32).to_be_bytes());
     frame.extend_from_slice(&body);
 
@@ -112,7 +117,7 @@ pub fn decode<T: WireDecode>(buf: &mut &[u8]) -> Result<T, DecodeErr> {
     let type_id = {
         let mut type_id_buf = [0u8; 4];
         buf.read_exact(&mut type_id_buf)?;
-        u32::from_be_bytes(type_id_buf)
+        u32::from_be_bytes(type_id_buf).try_into()?
     };
     let length = {
         let mut len_buf = [0u8; 4];
@@ -121,7 +126,7 @@ pub fn decode<T: WireDecode>(buf: &mut &[u8]) -> Result<T, DecodeErr> {
     };
 
     if type_id != T::TYPE_ID {
-        return Err(DecodeErr::InvalidType {
+        return Err(DecodeErr::UnexpectedType {
             expected: T::TYPE_ID,
             got: type_id,
         });
