@@ -1,5 +1,6 @@
 use std::io::Read;
 
+use bytes::BytesMut;
 use thiserror::Error;
 
 use crate::codec::impls::{EnumFromU32Err, TypeIds};
@@ -93,6 +94,26 @@ impl WireWrite for Vec<u8> {
     }
 }
 
+impl WireWrite for BytesMut {
+    fn u32(&mut self, value: u32) {
+        let bytes = value.to_be_bytes();
+        self.extend_from_slice(&bytes);
+    }
+
+    fn string(&mut self, value: &str) {
+        self.bytes(value.as_bytes())
+    }
+
+    fn bytes(&mut self, value: &[u8]) {
+        let len = value.len();
+
+        self.reserve(len + 4);
+
+        self.u32(len as u32);
+        self.extend_from_slice(value);
+    }
+}
+
 pub trait WireRead {
     fn u32(&mut self) -> Result<u32, DecodeErr>;
     fn string(&mut self) -> Result<String, DecodeErr>;
@@ -136,18 +157,18 @@ pub trait WireEncode: WireType {
     fn encode_body(&self, buf: &mut impl WireWrite);
 }
 
-pub fn encode<T: WireEncode>(value: &T) -> Vec<u8> {
-    let mut body = Vec::new();
+pub fn encode<T: WireEncode>(value: &T) -> bytes::Bytes {
+    let mut body = BytesMut::new();
     value.encode_body(&mut body);
 
     let header = Header::new::<T>(body.len());
 
-    let mut frame = Vec::with_capacity(8 + body.len());
+    let mut frame = BytesMut::with_capacity(8 + body.len());
 
     frame.extend_from_slice(&header.encode());
     frame.extend_from_slice(&body);
 
-    frame
+    frame.freeze()
 }
 
 pub fn decode<T: WireDecode>(header: Header, buf: &mut &[u8]) -> Result<T, DecodeErr> {

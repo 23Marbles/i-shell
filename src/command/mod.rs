@@ -1,3 +1,5 @@
+use std::process::ExitStatus;
+
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard};
 
 use crate::{
@@ -33,12 +35,12 @@ impl CommandContext {
     }
 
     #[must_use]
-    pub async fn send_stdout<T: WireEncode>(&self, v: T) -> Result<(), StreamSendError> {
+    pub async fn send_stdout<T: WireEncode>(&mut self, v: T) -> Result<(), StreamSendError> {
         self.stdout.send(&v).await
     }
 
     #[must_use]
-    pub async fn send_stderr<T: WireEncode>(&self, v: T) -> Result<(), StreamSendError> {
+    pub async fn send_stderr<T: WireEncode>(&mut self, v: T) -> Result<(), StreamSendError> {
         self.stderr.send(&v).await
     }
 
@@ -96,7 +98,8 @@ command_error_kinds_impl!(
     not_found -> NotFound(String),
     send_error -> SendError(StreamSendError),
     recv_error -> RecvError(StreamReceiveError),
-    other -> Other(String)
+    other -> Other(String),
+    child_exit_err -> ChildExitErr(ExitStatus)
 );
 
 #[derive(Debug, thiserror::Error)]
@@ -113,6 +116,9 @@ pub enum CommandErrorKind {
     RecvError(#[from] StreamReceiveError),
     #[error("{0}")]
     Other(String),
+
+    #[error("{0}")]
+    ChildExitErr(ExitStatus),
 }
 
 pub trait IntoCommandError {

@@ -2,13 +2,13 @@ use crate::codec::{self, Header, WireDecode, WireEncode, decode, encode};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StreamSendError {
-    #[error("")]
-    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    IoErr(#[from] std::io::Error),
 }
 
 #[async_trait::async_trait]
 pub trait StreamSender: Send {
-    async fn send<'a>(&self, value: &'a [u8]) -> Result<(), StreamSendError>;
+    async fn send(&mut self, value: bytes::Bytes) -> Result<(), StreamSendError>;
 }
 
 #[async_trait::async_trait]
@@ -32,10 +32,21 @@ pub struct StreamRx {
     inner: Box<dyn StreamReceiver + Send + Sync>,
 }
 
+impl<R: StreamReceiver + Send + Sync + 'static> From<R> for StreamRx {
+    fn from(value: R) -> Self {
+        Self {
+            inner: Box::new(value),
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum StreamReceiveError {
     #[error("the sender has been closed")]
     SenderClosed,
+
+    #[error(transparent)]
+    IoErr(#[from] std::io::Error),
 
     #[error(transparent)]
     Decode(#[from] codec::DecodeErr),
@@ -58,12 +69,20 @@ impl StreamRx {
     }
 }
 
+impl<T: StreamSender + Send + Sync + 'static> From<T> for StreamTx {
+    fn from(value: T) -> Self {
+        Self {
+            inner: Box::new(value),
+        }
+    }
+}
+
 pub struct StreamTx {
     inner: Box<dyn StreamSender + Send + Sync>,
 }
 
 impl StreamTx {
-    pub async fn send<T: WireEncode>(&self, value: &T) -> Result<(), StreamSendError> {
-        self.inner.send(&encode(value)).await
+    pub async fn send<T: WireEncode>(&mut self, value: &T) -> Result<(), StreamSendError> {
+        self.inner.send(encode(value)).await
     }
 }

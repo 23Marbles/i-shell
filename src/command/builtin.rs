@@ -33,11 +33,12 @@ impl Builtins {
 }
 
 macro_rules! builtin_list {
-    ($($const_name:ident = $name:literal |$ctx:tt, $args:tt| $cmd:block);*) => {
+    ($($const_name:ident = $name:literal |mut $ctx:ident, $args:tt| $cmd:block);*) => {
         $(
             pub const $const_name: Builtin = Builtin {
                 name: $name,
-                function: |$ctx, $args| Box::pin(async move {
+                #[allow(unused_mut)]
+                function: |mut $ctx, $args| Box::pin(async move {
                     #[allow(unused_macros)]
                     macro_rules! btry {
                         ($expr:expr) => {
@@ -92,14 +93,14 @@ macro_rules! builtin_list {
 }
 
 builtin_list!(
-    EXIT = "exit" | _, _ | { Ok(CommandResult::Exit(0)) };
+    EXIT = "exit" | mut _ctx, _ | { Ok(CommandResult::Exit(0)) };
 
-    ECHO = "echo" |ctx, args| {
+    ECHO = "echo" | mut ctx, args| {
         btry!(ctx.send_stdout(args.values.join(" ")).await);
         Ok(CommandResult::Continue)
     };
 
-    TYPE = "type" |ctx, args| {
+    TYPE = "type" |mut ctx, args| {
         let target = btry!(args
             .values
             .first()
@@ -118,13 +119,13 @@ builtin_list!(
         Ok(CommandResult::Continue)
     };
 
-    PWD = "pwd" |ctx, args| {
+    PWD = "pwd" |mut ctx, args| {
         let cwd = ctx.shell().await.cwd.to_string_lossy().into_owned();
         btry!(ctx.send_stdout(cwd).await);
         Ok(CommandResult::Continue)
     };
 
-    CD = "cd" |ctx, args| {
+    CD = "cd" |mut ctx, args| {
         let new_path_str = match args.values.first() {
             Some(path) => path,
             None => return Ok(CommandResult::Continue),
