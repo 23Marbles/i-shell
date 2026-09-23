@@ -1,35 +1,21 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf, pin::Pin};
 
-use crate::{
-    command::{CommandContext, CommandError, CommandResult},
-    read::Args,
-    streams::{StreamRx, StreamTx},
-};
+use crate::command::{Args, CommandContext, CommandError, CommandErrorKind, CommandResult};
 
-pub trait TypedBuiltin: Send + Sync + 'static {
-    type Input: Send + 'static;
-    type Output: Send + 'static;
+pub type BuiltinFuture = Pin<Box<dyn Future<Output = Result<CommandResult, CommandError>> + Send>>;
 
-    fn run(
-        self,
-        stdin: StreamRx<Self::Input>,
-        stdout: StreamTx<Self::Output>,
-        args: Args,
-    ) -> impl Future<Output = Result<CommandResult, CommandError>> + Send;
-}
+pub type BuiltinFunc = fn(CommandContext, Args) -> BuiltinFuture;
 
-pub type BuiltinFunc<T> = fn(CommandContext<T>, &Args) -> Result<CommandResult, CommandError>;
-
-pub struct Builtin<T> {
+pub struct Builtin {
     pub name: &'static str,
-    function: BuiltinFunc<T>,
+    function: BuiltinFunc,
 }
 
 #[repr(transparent)]
-pub struct Builtins<T>(HashMap<&'static str, BuiltinFunc<T>>);
+pub struct Builtins(HashMap<&'static str, BuiltinFunc>);
 
-impl<T> Builtins<T> {
-    pub fn from_builtins(builtins: &[Builtin<T>]) -> Self {
+impl Builtins {
+    pub fn from_builtins(builtins: &[Builtin]) -> Self {
         let mut map = HashMap::new();
 
         for Builtin { name, function } in builtins {
@@ -41,64 +27,114 @@ impl<T> Builtins<T> {
         Self(map)
     }
 
-    pub fn get(&self, name: &str) -> Option<BuiltinFunc<T>> {
+    pub fn get(&self, name: &str) -> Option<BuiltinFunc> {
         self.0.get(name).map(|f| *f)
     }
 }
 
-pub const EXIT: Builtin = Builtin {
-    name: "exit",
-    // TODO:
-    // Exiting with exit codes using args
-    function: |_, _| std::process::exit(0),
-};
+macro_rules! builtin_list {
+    ($($const_name:ident = $name:literal |$ctx:tt, $args:tt| $cmd:block);*) => {
+        $(
+            pub const $const_name: Builtin = Builtin {
+                name: $name,
+                function: |$ctx, $args| Box::pin(async move {
+                    #[allow(unused_macros)]
+                    macro_rules! btry {
+                        ($expr:expr) => {
+                            match $expr {
+                                Ok(v) => v,
+                                Err(err) => {
+                                    use $crate::command::IntoCommandError;
+                                    return Err(err.into_command_error(
+                                        $name,
+                                        $args.clone(),
+                                    ));
+                                }
+                            }
+                        };
+                        ($expr:expr => $kind:ident()) => {
+                            match $expr {
+                                Ok(v) => v,
+                                Err(err) => {
+                                    return Err(CommandError::$kind(
+                                        $name,
+                                        $args.clone(),
+                                        err,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    #[allow(unused_macros)]
+                    macro_rules! err {
+                        ($err:expr) => {
+                            use $crate::command::IntoCommandError;
+                            return Err($err.into_command_error(
+                                $name,
+                                $args.clone(),
+                            ));
+                        };
+                        ($err:expr => $kind:ident()) => {
+                            return Err(CommandError::$kind(
+                                $name,
+                                $args.clone(),
+                                $err,
+                            ));
+                        }
+                    }
+                    $cmd
+                }),
+            };
+        )*
 
-pub const ECHO: Builtin = Builtin {
-    name: "echo",
-    function: |_, args, w, _, _| {
-        writeln!(w, "{}", args.join(" ")).unwrap();
-        Ok(())
-    },
-};
+        pub const BUILTINS: &[Builtin] = &[$($const_name,)*];
+    };
+}
 
-pub const TYPE: Builtin = Builtin {
-    name: "type",
-    function: |shell, args, w, _, _| {
-        let target = args.get(0).ok_or("type: missing operand".to_string())?;
+builtin_list!(
+    EXIT = "exit" | _, _ | { Ok(CommandResult::Exit(0)) };
 
-        if shell.has_builtin(&target) {
-            writeln!(w, "{} is a shell builtin", target).unwrap();
-        } else if let Some(path) = shell.resolve_program(target) {
-            writeln!(w, "{} is {}", args[0], path.display()).unwrap();
+    ECHO = "echo" |ctx, args| {
+        btry!(ctx.send_stdout(args.values.join(" ")).await);
+        Ok(CommandResult::Continue)
+    };
+
+    TYPE = "type" |ctx, args| {
+        let target = btry!(args
+            .values
+            .first()
+            .ok_or("missing operand".to_string()) => args());
+
+        if ctx.shell().await.has_builtin(target) {
+            btry!(ctx.send_stdout(format!("{} is a shell builtin", target))
+                .await);
+        } else if let Some(path) = ctx.shell().await.resolve_program(target) {
+            btry!(ctx.send_stdout(format!("{} is {}", target, path.display()))
+                .await);
         } else {
-            return Err(format!("{}: not found", target));
+            err!(target.clone() => not_found());
         }
 
-        Ok(())
-    },
-};
+        Ok(CommandResult::Continue)
+    };
 
-pub const PWD: Builtin = Builtin {
-    name: "pwd",
-    function: |shell, _, w, _, _| {
-        writeln!(w, "{}", shell.cwd.to_string_lossy()).unwrap();
-        Ok(())
-    },
-};
+    PWD = "pwd" |ctx, args| {
+        let cwd = ctx.shell().await.cwd.to_string_lossy().into_owned();
+        btry!(ctx.send_stdout(cwd).await);
+        Ok(CommandResult::Continue)
+    };
 
-pub const CD: Builtin = Builtin {
-    name: "cd",
-    function: |shell, args, _, _, _| {
-        let new_path_str = match args.first() {
+    CD = "cd" |ctx, args| {
+        let new_path_str = match args.values.first() {
             Some(path) => path,
-            None => return Ok(()),
+            None => return Ok(CommandResult::Continue),
         };
 
-        let join_path = PathBuf::from(*new_path_str);
+        let join_path = PathBuf::from(new_path_str);
 
         let new_path = if *new_path_str == "~" {
-            let home_dir = std::env::var_os("HOME")
-                .ok_or(format!("cd: ~: No HOME environemt variable set"))?;
+            let home_dir = btry!(std::env::var_os("HOME")
+                .ok_or(CommandErrorKind::Other("No HOME environemt variable set".to_string())));
 
             PathBuf::from(home_dir)
         } else if join_path.is_absolute() {
@@ -106,14 +142,14 @@ pub const CD: Builtin = Builtin {
         } else {
             let components = join_path.components();
 
-            let mut pathbuf = shell.cwd.clone();
+            let mut pathbuf = ctx.shell().await.cwd.clone();
 
             for component in components {
                 match component {
                     std::path::Component::CurDir => (),
                     std::path::Component::ParentDir => {
                         if !pathbuf.pop() {
-                            return Err(format!("cd: {new_path_str}: No such file or directory"));
+                            err!(format!("No such file or directory") => other());
                         }
                     }
                     std::path::Component::Normal(os_str) => pathbuf.push(os_str),
@@ -127,13 +163,11 @@ pub const CD: Builtin = Builtin {
         };
 
         if !new_path.exists() {
-            return Err(format!("cd: {new_path_str}: No such file or directory"));
+            err!("No such file or directory".to_string() => other());
         }
 
-        shell.cwd = new_path;
+        ctx.shell_mut().await.cwd = new_path;
 
-        Ok(())
-    },
-};
-
-pub const BUILTINS: &[Builtin] = &[EXIT, ECHO, TYPE, PWD, CD];
+        Ok(CommandResult::Continue)
+    }
+);

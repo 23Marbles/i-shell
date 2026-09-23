@@ -6,6 +6,42 @@ use crate::codec::impls::{EnumFromU32Err, TypeIds};
 
 mod impls;
 
+pub struct Header {
+    type_id: TypeIds,
+    pub length: usize,
+}
+
+impl Header {
+    pub fn new<T: WireType>(length: usize) -> Self {
+        Self {
+            type_id: T::TYPE_ID,
+            length,
+        }
+    }
+
+    pub fn decode(input: [u8; 8]) -> Result<Self, DecodeErr> {
+        let mut type_id_arr = [0u8; 4];
+        type_id_arr.copy_from_slice(&input[..4]);
+        let type_id = TypeIds::try_from(u32::from_be_bytes(type_id_arr))?;
+
+        let mut len_arr = [0u8; 4];
+        len_arr.copy_from_slice(&input[4..]);
+        let length = u32::from_be_bytes(len_arr) as usize;
+
+        Ok(Self { type_id, length })
+    }
+
+    pub fn encode(self) -> [u8; 8] {
+        let mut buf = [0u8; 8];
+
+        buf[..4].copy_from_slice(&self.type_id.as_u32().to_be_bytes());
+
+        buf[4..].copy_from_slice(&(self.length as u32).to_be_bytes());
+
+        buf
+    }
+}
+
 pub trait WireType {
     const TYPE_ID: impls::TypeIds;
 }
@@ -104,38 +140,28 @@ pub fn encode<T: WireEncode>(value: &T) -> Vec<u8> {
     let mut body = Vec::new();
     value.encode_body(&mut body);
 
+    let header = Header::new::<T>(body.len());
+
     let mut frame = Vec::with_capacity(8 + body.len());
 
-    frame.extend_from_slice(&(T::TYPE_ID as u32).to_be_bytes());
-    frame.extend_from_slice(&(body.len() as u32).to_be_bytes());
+    frame.extend_from_slice(&header.encode());
     frame.extend_from_slice(&body);
 
     frame
 }
 
-pub fn decode<T: WireDecode>(buf: &mut &[u8]) -> Result<T, DecodeErr> {
-    let type_id = {
-        let mut type_id_buf = [0u8; 4];
-        buf.read_exact(&mut type_id_buf)?;
-        u32::from_be_bytes(type_id_buf).try_into()?
-    };
-    let length = {
-        let mut len_buf = [0u8; 4];
-        buf.read_exact(&mut len_buf)?;
-        u32::from_be_bytes(len_buf) as usize
-    };
-
-    if type_id != T::TYPE_ID {
+pub fn decode<T: WireDecode>(header: Header, buf: &mut &[u8]) -> Result<T, DecodeErr> {
+    if header.type_id != T::TYPE_ID {
         return Err(DecodeErr::UnexpectedType {
             expected: T::TYPE_ID,
-            got: type_id,
+            got: header.type_id,
         });
     }
 
     let (body, rest) = buf
-        .split_at_checked(length)
+        .split_at_checked(header.length)
         .ok_or(DecodeErr::NotEnoughBytes {
-            expected: length,
+            expected: header.length,
             got: buf.len(),
         })?;
     *buf = rest;

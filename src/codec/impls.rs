@@ -60,6 +60,12 @@ macro_rules! impl_list {
     };
 }
 
+impl TypeIds {
+    pub fn as_u32(&self) -> u32 {
+        *self as u32
+    }
+}
+
 impl_list! {
     String => 1 = String,
 

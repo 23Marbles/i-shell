@@ -6,10 +6,6 @@ use rustyline::{
     validate::Validator,
 };
 
-pub struct Args {
-    pub values: Vec<String>,
-}
-
 pub struct LineHelper {}
 
 impl Hinter for LineHelper {
