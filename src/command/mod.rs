@@ -12,6 +12,7 @@ pub struct Args {
 }
 
 pub mod builtin;
+pub mod program;
 
 pub struct CommandContext {
     shell_handle: ShellHandle,

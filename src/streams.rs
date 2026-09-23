@@ -1,8 +1,10 @@
 use crate::codec::{self, Header, WireDecode, WireEncode, decode, encode};
 
 #[derive(Debug, thiserror::Error)]
-#[error("send error")]
-pub struct StreamSendError {}
+pub enum StreamSendError {
+    #[error("")]
+    Io(#[from] std::io::Error),
+}
 
 #[async_trait::async_trait]
 pub trait StreamSender: Send {
