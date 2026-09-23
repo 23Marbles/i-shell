@@ -34,17 +34,14 @@ impl CommandContext {
         self.shell_handle.handle.clone().write_owned().await
     }
 
-    #[must_use]
     pub async fn send_stdout<T: WireEncode>(&mut self, v: T) -> Result<(), StreamSendError> {
         self.stdout.send(&v).await
     }
 
-    #[must_use]
     pub async fn send_stderr<T: WireEncode>(&mut self, v: T) -> Result<(), StreamSendError> {
         self.stderr.send(&v).await
     }
 
-    #[must_use]
     pub async fn recv_stdin<T: WireDecode>(&mut self) -> Result<T, StreamReceiveError> {
         self.stdin.recv().await
     }

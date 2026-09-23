@@ -28,7 +28,7 @@ impl Builtins {
     }
 
     pub fn get(&self, name: &str) -> Option<BuiltinFunc> {
-        self.0.get(name).map(|f| *f)
+        self.0.get(name).copied()
     }
 }
 
@@ -150,7 +150,7 @@ builtin_list!(
                     std::path::Component::CurDir => (),
                     std::path::Component::ParentDir => {
                         if !pathbuf.pop() {
-                            err!(format!("No such file or directory") => other());
+                            err!("No such file or directory".to_string() => other());
                         }
                     }
                     std::path::Component::Normal(os_str) => pathbuf.push(os_str),

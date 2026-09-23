@@ -1,14 +1,13 @@
-use std::{
-    io::{Read, Write}, path::PathBuf, process::Stdio,
-};
+use std::{path::PathBuf, process::Stdio};
 
 use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    io::{AsyncReadExt, AsyncWriteExt},
     process::{Child, ChildStderr, ChildStdin, ChildStdout},
 };
 
 use crate::{
-    command::{Args, CommandError, IntoCommandError}, streams::{
+    command::{Args, CommandError, IntoCommandError},
+    streams::{
         StreamReceiveError, StreamReceiver, StreamRx, StreamSendError, StreamSender, StreamTx,
     },
 };
@@ -53,12 +52,24 @@ impl Program {
     }
 
     pub async fn result(self) -> Result<(), CommandError> {
-        let Self { path, args, mut child } = self;
+        let Self {
+            path,
+            args,
+            mut child,
+        } = self;
 
         match child.wait().await {
-            Ok(err) => if err.success() {Ok(())} else {
-                Err(CommandError::child_exit_err(path.to_string_lossy(), args, err))
-            },
+            Ok(err) => {
+                if err.success() {
+                    Ok(())
+                } else {
+                    Err(CommandError::child_exit_err(
+                        path.to_string_lossy(),
+                        args,
+                        err,
+                    ))
+                }
+            }
             Err(e) => Err(e.into_command_error(path.to_string_lossy(), args)),
         }
     }
@@ -67,8 +78,7 @@ impl Program {
 #[async_trait::async_trait]
 impl StreamSender for ChildStdin {
     async fn send(&mut self, data: bytes::Bytes) -> Result<(), StreamSendError> {
-        self.write_all(&data)
-            .await?;
+        self.write_all(&data).await?;
 
         Ok(())
     }
