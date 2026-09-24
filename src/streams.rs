@@ -2,6 +2,17 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::codec::{self, Header, WireDecode, WireEncode, decode, encode};
 
+pub mod adapter;
+
+#[derive(Debug, thiserror::Error)]
+pub enum StreamError {
+    #[error(transparent)]
+    Send(#[from] StreamSendError),
+
+    #[error(transparent)]
+    Receive(#[from] StreamReceiveError),
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum StreamSendError {
     #[error(transparent)]
@@ -38,6 +49,10 @@ pub struct StreamTx {
 impl StreamTx {
     pub async fn send<T: WireEncode>(&mut self, value: &T) -> Result<(), StreamSendError> {
         self.inner.send(encode(value)).await
+    }
+
+    pub async fn send_raw(&mut self, value: bytes::Bytes) -> Result<(), StreamSendError> {
+        self.inner.send(value).await
     }
 }
 
@@ -92,7 +107,6 @@ pub enum StreamReceiveError {
 }
 
 impl StreamRx {
-    /// Will only return None if the Sender has been dropped
     pub async fn recv<T: WireDecode>(&mut self) -> Result<T, StreamReceiveError> {
         let mut header_buf = [0u8; 8];
         self.inner.recv_exact(&mut header_buf).await?;
@@ -105,5 +119,17 @@ impl StreamRx {
         let val = decode(header, &mut buf.as_slice())?;
 
         Ok(val)
+    }
+
+    pub async fn recv_raw(&mut self) -> Result<bytes::Bytes, StreamReceiveError> {
+        let mut header_buf = [0u8; 8];
+        self.inner.recv_exact(&mut header_buf).await?;
+        let header = Header::decode(header_buf)?;
+
+        let mut buf = vec![0u8; header.length];
+
+        self.inner.recv_exact(&mut buf).await?;
+
+        Ok(buf.into())
     }
 }
