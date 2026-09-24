@@ -25,6 +25,7 @@ impl<T: StreamSender + Send + Sync + 'static> From<T> for StreamTx {
 impl<W: AsyncWriteExt + Send + Unpin> StreamSender for W {
     async fn send(&mut self, data: bytes::Bytes) -> Result<(), StreamSendError> {
         self.write_all(&data).await?;
+        self.flush().await?;
 
         Ok(())
     }
