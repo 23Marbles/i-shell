@@ -1,21 +1,13 @@
-use std::{path::PathBuf, process::Stdio};
-
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    process::{Child, ChildStderr, ChildStdin, ChildStdout},
-};
-
 use crate::{
     command::{Args, CommandError, IntoCommandError},
-    streams::{
-        StreamReceiveError, StreamReceiver, StreamRx, StreamSendError, StreamSender, StreamTx,
-    },
+    streams::{StreamRx, StreamTx},
 };
+use std::{path::PathBuf, process::Stdio};
 
 pub struct Program {
     path: PathBuf,
     args: Args,
-    child: Child,
+    child: tokio::process::Child,
 }
 
 pub struct ProgramBridge {
@@ -72,32 +64,5 @@ impl Program {
             }
             Err(e) => Err(e.into_command_error(path.to_string_lossy(), args)),
         }
-    }
-}
-
-#[async_trait::async_trait]
-impl StreamSender for ChildStdin {
-    async fn send(&mut self, data: bytes::Bytes) -> Result<(), StreamSendError> {
-        self.write_all(&data).await?;
-
-        Ok(())
-    }
-}
-
-#[async_trait::async_trait]
-impl StreamReceiver for ChildStdout {
-    async fn recv(&mut self, buf: &mut [u8]) -> Result<usize, StreamReceiveError> {
-        let len = self.read(buf).await?;
-
-        Ok(len)
-    }
-}
-
-#[async_trait::async_trait]
-impl StreamReceiver for ChildStderr {
-    async fn recv(&mut self, buf: &mut [u8]) -> Result<usize, StreamReceiveError> {
-        let len = self.read(buf).await?;
-
-        Ok(len)
     }
 }

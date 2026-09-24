@@ -1,3 +1,5 @@
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
 use crate::codec::{self, Header, WireDecode, WireEncode, decode, encode};
 
 #[derive(Debug, thiserror::Error)]
@@ -9,6 +11,54 @@ pub enum StreamSendError {
 #[async_trait::async_trait]
 pub trait StreamSender: Send {
     async fn send(&mut self, value: bytes::Bytes) -> Result<(), StreamSendError>;
+}
+
+impl<T: StreamSender + Send + Sync + 'static> From<T> for StreamTx {
+    fn from(value: T) -> Self {
+        Self {
+            inner: Box::new(value),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl<W: AsyncWriteExt + Send + Unpin> StreamSender for W {
+    async fn send(&mut self, data: bytes::Bytes) -> Result<(), StreamSendError> {
+        self.write_all(&data).await?;
+
+        Ok(())
+    }
+}
+
+pub struct StreamTx {
+    inner: Box<dyn StreamSender + Send + Sync>,
+}
+
+impl StreamTx {
+    pub async fn send<T: WireEncode>(&mut self, value: &T) -> Result<(), StreamSendError> {
+        self.inner.send(encode(value)).await
+    }
+}
+
+pub struct StreamRx {
+    inner: Box<dyn StreamReceiver + Send + Sync>,
+}
+
+#[async_trait::async_trait]
+impl<R: AsyncReadExt + Send + Unpin> StreamReceiver for R {
+    async fn recv(&mut self, buf: &mut [u8]) -> Result<usize, StreamReceiveError> {
+        let len = self.read(buf).await?;
+
+        Ok(len)
+    }
+}
+
+impl<R: StreamReceiver + Send + Sync + 'static> From<R> for StreamRx {
+    fn from(value: R) -> Self {
+        Self {
+            inner: Box::new(value),
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -25,18 +75,6 @@ pub trait StreamReceiver: Send {
         }
 
         Ok(())
-    }
-}
-
-pub struct StreamRx {
-    inner: Box<dyn StreamReceiver + Send + Sync>,
-}
-
-impl<R: StreamReceiver + Send + Sync + 'static> From<R> for StreamRx {
-    fn from(value: R) -> Self {
-        Self {
-            inner: Box::new(value),
-        }
     }
 }
 
@@ -66,23 +104,5 @@ impl StreamRx {
         let val = decode(header, &mut buf.as_slice())?;
 
         Ok(val)
-    }
-}
-
-impl<T: StreamSender + Send + Sync + 'static> From<T> for StreamTx {
-    fn from(value: T) -> Self {
-        Self {
-            inner: Box::new(value),
-        }
-    }
-}
-
-pub struct StreamTx {
-    inner: Box<dyn StreamSender + Send + Sync>,
-}
-
-impl StreamTx {
-    pub async fn send<T: WireEncode>(&mut self, value: &T) -> Result<(), StreamSendError> {
-        self.inner.send(encode(value)).await
     }
 }
