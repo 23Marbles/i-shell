@@ -9,10 +9,14 @@ pub struct EnumFromU32Err {
 macro_rules! impl_list {
     (
         $(
-            $name:ident => $id:literal = $type:ty,
-            fn decode($buf:ident) { $decode:expr },
-            fn encode($this:ident, $buf2:ident) { $encode:expr }
-        ),* $(,)?
+            $name:ident => $id:literal = $type:ty
+            $(,
+                fn decode($buf:ident) { $decode:expr }
+            )?
+            $(,
+                fn encode($this:ident, $buf2:ident) { $encode:expr }
+            )?
+        );* $(;)?
     ) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         #[repr(u32)]
@@ -40,22 +44,26 @@ macro_rules! impl_list {
                 const TYPE_ID: TypeIds = TypeIds::$name;
             }
 
-            impl WireDecode for $type {
-                fn decode_body(
-                    $buf: &mut impl super::WireRead
-                ) -> Result<Self, super::DecodeErr> {
-                    $decode
+            $(
+                impl WireDecode for $type {
+                    fn decode_body(
+                        $buf: &mut impl super::WireRead
+                    ) -> Result<Self, super::DecodeErr> {
+                        $decode
+                    }
                 }
-            }
+            )?
 
-            impl WireEncode for $type {
-                fn encode_body(
-                    &$this,
-                    $buf2: &mut impl super::WireWrite
-                ) {
-                    $encode
+            $(
+                impl WireEncode for $type {
+                    fn encode_body(
+                        &$this,
+                        $buf2: &mut impl super::WireWrite
+                    ) {
+                        $encode
+                    }
                 }
-            }
+            )?
         )*
     };
 }
@@ -68,32 +76,31 @@ impl TypeIds {
 
 impl_list! {
     String => 1 = String,
+        fn decode(buf) {
+            buf.string()
+        },
+        fn encode(self, buf) {
+            buf.string(self)
+        };
 
-    fn decode(buf) {
-        buf.string()
-    },
+    Str => 2 = &str,
+        fn encode(self, buf) {
+            buf.string(self)
+        };
 
-    fn encode(self, buf) {
-        buf.string(self)
-    },
+    U32 => 3 = u32,
+        fn decode(buf) {
+            buf.u32()
+        },
+        fn encode(self, buf) {
+            buf.u32(*self)
+        };
 
-    U32 => 2 = u32,
-
-    fn decode(buf) {
-        buf.u32()
-    },
-
-    fn encode(self, buf) {
-        buf.u32(*self)
-    },
-
-    Bytes => 3 = Vec<u8>,
-
-    fn decode(buf) {
-        buf.bytes()
-    },
-
-    fn encode(self, buf) {
-        buf.bytes(self)
-    },
+    Bytes => 4 = Vec<u8>,
+        fn decode(buf) {
+            buf.bytes()
+        },
+        fn encode(self, buf) {
+            buf.bytes(self)
+        };
 }
