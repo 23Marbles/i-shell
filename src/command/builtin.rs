@@ -97,6 +97,7 @@ builtin_list!(
 
     ECHO = "echo" | mut ctx, args| {
         btry!(ctx.send_stdout(args.values.join(" ")).await);
+        btry!(ctx.send_stdout("\n").await);
         Ok(CommandResult::Continue)
     };
 
@@ -107,10 +108,10 @@ builtin_list!(
             .ok_or("missing operand".to_string()) => args());
 
         if ctx.shell().await.has_builtin(target) {
-            btry!(ctx.send_stdout(format!("{} is a shell builtin", target))
+            btry!(ctx.send_stdout(format!("{} is a shell builtin\n", target))
                 .await);
         } else if let Some(path) = ctx.shell().await.resolve_program(target) {
-            btry!(ctx.send_stdout(format!("{} is {}", target, path.display()))
+            btry!(ctx.send_stdout(format!("{} is {}\n", target, path.display()))
                 .await);
         } else {
             err!(target.clone() => not_found());
@@ -135,7 +136,7 @@ builtin_list!(
 
         let new_path = if *new_path_str == "~" {
             let home_dir = btry!(std::env::var_os("HOME")
-                .ok_or(CommandErrorKind::Other("No HOME environemt variable set".to_string())));
+            .ok_or(CommandErrorKind::Other("No HOME environemt variable set".to_string())));
 
             PathBuf::from(home_dir)
         } else if join_path.is_absolute() {
