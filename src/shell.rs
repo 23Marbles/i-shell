@@ -19,18 +19,22 @@ pub struct Shell {
 }
 
 impl Shell {
+    #[inline]
     pub fn resolve_builtin(&self, builtin_name: &str) -> Option<BuiltinFunc> {
         self.builtins.get(builtin_name)
     }
 
+    #[inline]
     pub fn has_builtin(&self, builtin_name: &str) -> bool {
         self.resolve_builtin(builtin_name).is_some()
     }
 
+    #[inline]
     pub fn resolve_program(&self, program_name: &str) -> Option<PathBuf> {
         find_executable_in_path(program_name)
     }
 
+    #[inline]
     pub fn has_program(&self, program_name: &str) -> bool {
         self.resolve_program(program_name).is_some()
     }

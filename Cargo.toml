@@ -9,4 +9,4 @@ bytes = "1.12.1"
 pathsearch = "0.2.0"
 rustyline = "18.0.1"
 thiserror = "2.0.20"
-tokio = { version = "1.53.1", features = ["io-util", "net", "process", "sync"] }
+tokio = { version = "1.53.1", features = ["io-std", "io-util", "net", "process", "sync"] }

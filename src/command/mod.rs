@@ -16,6 +16,55 @@ pub struct Args {
 pub mod builtin;
 pub mod program;
 
+pub struct CommandContextBuilder {
+    shell_handle: ShellHandle,
+    stdin: Option<StreamRx>,
+    stdout: Option<StreamTx>,
+    stderr: Option<StreamTx>,
+}
+
+impl CommandContextBuilder {
+    pub fn new(shell_handle: ShellHandle) -> CommandContextBuilder {
+        Self {
+            shell_handle,
+            stdin: None,
+            stdout: None,
+            stderr: None,
+        }
+    }
+
+    pub fn with_stdin(mut self, stdin: StreamRx) -> Self {
+        self.stdin = Some(stdin);
+        self
+    }
+
+    pub fn with_stdout(mut self, stdout: StreamTx) -> Self {
+        self.stdout = Some(stdout);
+        self
+    }
+
+    pub fn with_stderr(mut self, stderr: StreamTx) -> Self {
+        self.stderr = Some(stderr);
+        self
+    }
+
+    pub fn build(self) -> CommandContext {
+        let Self {
+            shell_handle,
+            stdin,
+            stdout,
+            stderr,
+        } = self;
+
+        CommandContext {
+            shell_handle,
+            stdin: stdin.unwrap_or(StreamRx::from(tokio::io::stdin())),
+            stdout: stdout.unwrap_or(StreamTx::from(tokio::io::stdout())),
+            stderr: stderr.unwrap_or(StreamTx::from(tokio::io::stderr())),
+        }
+    }
+}
+
 pub struct CommandContext {
     shell_handle: ShellHandle,
     pub stdin: StreamRx,
