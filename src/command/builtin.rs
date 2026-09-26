@@ -107,10 +107,10 @@ builtin_list!(
             .first()
             .ok_or("missing operand".to_string()) => args());
 
-        if ctx.shell().await.has_builtin(target) {
+        if ctx.shell(|shell| shell.has_builtin(target)).await {
             btry!(ctx.println(format!("{} is a shell builtin", target))
                 .await);
-        } else if let Some(path) = ctx.shell().await.resolve_program(target) {
+        } else if let Some(path) = ctx.shell(|shell| shell.resolve_program(target)).await {
             btry!(ctx.println(format!("{} is {}", target, path.display()))
                 .await);
         } else {
@@ -121,7 +121,7 @@ builtin_list!(
     };
 
     PWD = "pwd" |mut ctx, args| {
-        btry!(ctx.println(ctx.shell().await.cwd.display()).await);
+        btry!(ctx.println(ctx.shell(|shell| shell.cwd.to_path_buf()).await.display()).await);
         Ok(CommandResult::Continue)
     };
 
@@ -143,7 +143,7 @@ builtin_list!(
         } else {
             let components = join_path.components();
 
-            let mut pathbuf = ctx.shell().await.cwd.clone();
+            let mut pathbuf = ctx.shell(|shell| shell.cwd.clone()).await;
 
             for component in components {
                 match component {
@@ -167,7 +167,7 @@ builtin_list!(
             err!("No such file or directory".to_string() => other());
         }
 
-        ctx.shell_mut().await.cwd = new_path;
+        let _ = ctx.shell_mut(|mut shell| shell.cwd = new_path).await;
 
         Ok(CommandResult::Continue)
     }

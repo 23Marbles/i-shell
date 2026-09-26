@@ -1,7 +1,7 @@
-use std::{path::PathBuf, str::FromStr, sync::Arc};
+use std::{ops::{Deref, DerefMut}, path::PathBuf, str::FromStr, sync::Arc};
 
 use pathsearch::find_executable_in_path;
-use rustyline::{Editor, history::DefaultHistory};
+use rustyline::{Editor, error::ReadlineError, history::DefaultHistory};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::{
@@ -71,7 +71,7 @@ impl Shell {
 
     pub fn new() -> ShellRunner {
         ShellRunner {
-            handle: ShellHandle {
+            shell_handle: ShellHandle {
                 handle: Arc::new(RwLock::new(Self::default())),
             },
         }
@@ -79,23 +79,23 @@ impl Shell {
 }
 
 pub struct ShellRunner {
-    handle: ShellHandle,
+    shell_handle: ShellHandle,
 }
 
 impl ShellRunner {
-    #[inline(always)]
-    async fn write(&mut self) -> RwLockWriteGuard<'_, Shell> {
-        self.handle.handle.write().await
+    #[must_use]
+    pub async fn shell<R>(&self, func: impl FnOnce(&Shell) -> R) -> R {
+        (func)(self.shell_handle.handle.read().await.deref())
     }
 
-    #[inline(always)]
-    async fn read(&mut self) -> RwLockReadGuard<'_, Shell> {
-        self.handle.handle.read().await
+    #[must_use]
+    pub async fn shell_mut<R>(&self, func: impl FnOnce(&mut Shell) -> R) -> R {
+        (func)(self.shell_handle.handle.write().await.deref_mut())
     }
 
-    pub async fn run(mut self) -> Result<(), rustyline::error::ReadlineError> {
+    pub async fn run(mut self) -> Result<(), ReadlineError> {
         loop {
-            let line = self.handle.handle.write().await.editor.readline(">> ")?;
+            let line = self.shell_mut(|this| this.editor.readline(">> ")).await?;
 
             let pipeline = Pipeline::try_from(line).unwrap();
 
@@ -113,11 +113,9 @@ impl ShellRunner {
     ) -> Result<CommandResult, CommandError> {
         let CommandSpec { name, args } = pipeline.cmd;
 
-        let handle = self.handle.clone();
+        let ctx = CommandContextBuilder::new(&self.shell_handle).build();
 
-        let ctx = CommandContextBuilder::new(handle).build();
-
-        if let Some(func) = self.handle.handle.read().await.resolve_builtin(&name) {
+        if let Some(func) = self.shell(|this| this.resolve_builtin(&name)).await {
             (func)(ctx, args).await
         } else {
             return Err(CommandError::not_found(name.clone(), args, name));

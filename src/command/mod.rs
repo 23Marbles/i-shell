@@ -1,6 +1,6 @@
-use std::{fmt::Display, process::ExitStatus};
+use std::{fmt::Display, ops::{Deref, DerefMut}, process::ExitStatus};
 
-use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard};
+use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
 
 use crate::{
     codec::{WireDecode, WireEncode},
@@ -24,9 +24,9 @@ pub struct CommandContextBuilder {
 }
 
 impl CommandContextBuilder {
-    pub fn new(shell_handle: ShellHandle) -> CommandContextBuilder {
+    pub fn new(shell_handle: &ShellHandle) -> CommandContextBuilder {
         Self {
-            shell_handle,
+            shell_handle: shell_handle.clone(),
             stdin: None,
             stdout: None,
             stderr: None,
@@ -74,13 +74,13 @@ pub struct CommandContext {
 
 impl CommandContext {
     #[must_use]
-    pub async fn shell(&self) -> OwnedRwLockReadGuard<Shell> {
-        self.shell_handle.handle.clone().read_owned().await
+    pub async fn shell<R>(&self, func: impl FnOnce(&Shell) -> R) -> R {
+        (func)(self.shell_handle.handle.read().await.deref())
     }
 
     #[must_use]
-    pub async fn shell_mut(&self) -> OwnedRwLockWriteGuard<Shell> {
-        self.shell_handle.handle.clone().write_owned().await
+    pub async fn shell_mut<R>(&self, func: impl FnOnce(&mut Shell) -> R) -> R {
+        (func)(self.shell_handle.handle.write().await.deref_mut())
     }
 
     pub async fn print<T: Display>(&mut self, v: T) -> Result<(), StreamSendError> {
