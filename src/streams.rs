@@ -47,7 +47,7 @@ pub struct StreamTx {
 }
 
 impl StreamTx {
-    pub async fn send<T: WireEncode>(&mut self, value: &T) -> Result<(), StreamSendError> {
+    pub async fn send<T: WireEncode>(&mut self, value: T) -> Result<(), StreamSendError> {
         self.inner.send(encode(value)).await
     }
 

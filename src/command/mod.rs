@@ -1,4 +1,4 @@
-use std::process::ExitStatus;
+use std::{fmt::Display, process::ExitStatus};
 
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard};
 
@@ -58,18 +58,18 @@ impl CommandContextBuilder {
 
         CommandContext {
             shell_handle,
-            stdin: stdin.unwrap_or(StreamRx::from(tokio::io::stdin())),
-            stdout: stdout.unwrap_or(StreamTx::from(tokio::io::stdout())),
-            stderr: stderr.unwrap_or(StreamTx::from(tokio::io::stderr())),
+            stdin,
+            stdout,
+            stderr,
         }
     }
 }
 
 pub struct CommandContext {
     shell_handle: ShellHandle,
-    pub stdin: StreamRx,
-    pub stdout: StreamTx,
-    pub stderr: StreamTx,
+    pub stdin: Option<StreamRx>,
+    pub stdout: Option<StreamTx>,
+    pub stderr: Option<StreamTx>,
 }
 
 impl CommandContext {
@@ -83,16 +83,62 @@ impl CommandContext {
         self.shell_handle.handle.clone().write_owned().await
     }
 
-    pub async fn send_stdout<T: WireEncode>(&mut self, v: T) -> Result<(), StreamSendError> {
-        self.stdout.send(&v).await
+    pub async fn print<T: Display>(&mut self, v: T) -> Result<(), StreamSendError> {
+        if let Some(ref mut out) = self.stdout {
+            out.send(v.to_string()).await
+        } else {
+            print!("{v}");
+
+            Ok(())
+        }
     }
 
-    pub async fn send_stderr<T: WireEncode>(&mut self, v: T) -> Result<(), StreamSendError> {
-        self.stderr.send(&v).await
+    pub async fn println<T: Display>(&mut self, v: T) -> Result<(), StreamSendError> {
+        if let Some(ref mut out) = self.stdout {
+            out.send(format!("{v}\n")).await
+        } else {
+            println!("{v}");
+
+            Ok(())
+        }
     }
 
-    pub async fn recv_stdin<T: WireDecode>(&mut self) -> Result<T, StreamReceiveError> {
-        self.stdin.recv().await
+    pub async fn eprint<T: Display>(&mut self, v: T) -> Result<(), StreamSendError> {
+        if let Some(ref mut err) = self.stderr {
+            err.send(v.to_string()).await
+        } else {
+            eprint!("{v}");
+
+            Ok(())
+        }
+    }
+
+    pub async fn eprintln<T: Display>(&mut self, v: T) -> Result<(), StreamSendError> {
+        if let Some(ref mut err) = self.stderr {
+            err.send(format!("{v}\n")).await
+        } else {
+            eprintln!("{v}");
+
+            Ok(())
+        }
+    }
+
+    pub async fn send_stdout<T: WireEncode>(
+        &mut self,
+        v: T,
+    ) -> Option<Result<(), StreamSendError>> {
+        Some(self.stdout.as_mut()?.send(v).await)
+    }
+
+    pub async fn send_stderr<T: WireEncode>(
+        &mut self,
+        v: T,
+    ) -> Option<Result<(), StreamSendError>> {
+        Some(self.stderr.as_mut()?.send(v).await)
+    }
+
+    pub async fn recv_stdin<T: WireDecode>(&mut self) -> Option<Result<T, StreamReceiveError>> {
+        Some(self.stdin.as_mut()?.recv().await)
     }
 }
 

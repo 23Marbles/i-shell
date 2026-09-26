@@ -157,7 +157,7 @@ pub trait WireEncode: WireType {
     fn encode_body(&self, buf: &mut impl WireWrite);
 }
 
-pub fn encode<T: WireEncode>(value: &T) -> bytes::Bytes {
+pub fn encode<T: WireEncode>(value: T) -> bytes::Bytes {
     let mut body = BytesMut::new();
     value.encode_body(&mut body);
 

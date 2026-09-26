@@ -96,8 +96,7 @@ builtin_list!(
     EXIT = "exit" | mut _ctx, _ | { Ok(CommandResult::Exit(0)) };
 
     ECHO = "echo" | mut ctx, args| {
-        btry!(ctx.send_stdout(args.values.join(" ")).await);
-        btry!(ctx.send_stdout("\n").await);
+        btry!(ctx.println(args.values.join(" ")).await);
         Ok(CommandResult::Continue)
     };
 
@@ -108,10 +107,10 @@ builtin_list!(
             .ok_or("missing operand".to_string()) => args());
 
         if ctx.shell().await.has_builtin(target) {
-            btry!(ctx.send_stdout(format!("{} is a shell builtin\n", target))
+            btry!(ctx.println(format!("{} is a shell builtin", target))
                 .await);
         } else if let Some(path) = ctx.shell().await.resolve_program(target) {
-            btry!(ctx.send_stdout(format!("{} is {}\n", target, path.display()))
+            btry!(ctx.println(format!("{} is {}", target, path.display()))
                 .await);
         } else {
             err!(target.clone() => not_found());
@@ -121,8 +120,7 @@ builtin_list!(
     };
 
     PWD = "pwd" |mut ctx, args| {
-        let cwd = ctx.shell().await.cwd.to_string_lossy().into_owned();
-        btry!(ctx.send_stdout(cwd).await);
+        btry!(ctx.println(ctx.shell().await.cwd.display()).await);
         Ok(CommandResult::Continue)
     };
 
