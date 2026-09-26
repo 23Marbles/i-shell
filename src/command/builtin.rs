@@ -11,6 +11,7 @@ pub struct Builtin {
     function: BuiltinFunc,
 }
 
+#[derive(Debug)]
 #[repr(transparent)]
 pub struct Builtins(HashMap<&'static str, BuiltinFunc>);
 
@@ -133,7 +134,7 @@ builtin_list!(
         let join_path = PathBuf::from(new_path_str);
 
         let new_path = if *new_path_str == "~" {
-            let home_dir = btry!(std::env::var_os("HOME")
+            let home_dir = btry!(std::env::home_dir()
             .ok_or(CommandErrorKind::Other("No HOME environemt variable set".to_string())));
 
             PathBuf::from(home_dir)
