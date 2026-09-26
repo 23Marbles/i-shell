@@ -100,7 +100,15 @@ impl ShellRunner {
 
     pub async fn run(mut self) -> Result<(), ReadlineError> {
         loop {
-            let line = self.shell_mut(|this| this.editor.readline(">> ")).await?;
+            let line = self
+                .shell_mut(|this| match this.editor.readline(">> ") {
+                    Ok(s) => {
+                        this.editor.add_history_entry(&s)?;
+                        Ok(s)
+                    }
+                    Err(e) => Err(e),
+                })
+                .await?;
 
             let pipeline = Pipeline::try_from(line).unwrap();
 
