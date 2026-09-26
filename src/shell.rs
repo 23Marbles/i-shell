@@ -1,13 +1,18 @@
-use std::{ops::{Deref, DerefMut}, path::PathBuf, str::FromStr, sync::Arc};
+use std::{
+    ops::{Deref, DerefMut},
+    path::PathBuf,
+    sync::Arc,
+};
 
 use pathsearch::find_executable_in_path;
 use rustyline::{Editor, error::ReadlineError, history::DefaultHistory};
-use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use tokio::sync::RwLock;
 
 use crate::{
     command::{
         CommandContextBuilder, CommandError, CommandResult,
         builtin::{BUILTINS, BuiltinFunc, Builtins},
+        program::Program,
     },
     parse::{CommandSpec, Pipeline},
     read::LineHelper,
@@ -117,6 +122,12 @@ impl ShellRunner {
 
         if let Some(func) = self.shell(|this| this.resolve_builtin(&name)).await {
             (func)(ctx, args).await
+        } else if let Some(path) = self.shell(|this| this.resolve_program(&name)).await {
+            let program = Program::run(path, args, ctx).await?;
+
+            program.monitor().await?;
+
+            Ok(CommandResult::Continue)
         } else {
             return Err(CommandError::not_found(name.clone(), args, name));
         }

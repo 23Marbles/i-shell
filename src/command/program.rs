@@ -23,9 +23,10 @@ pub struct Adapters {
 }
 
 impl Program {
-    pub fn run(path: PathBuf, args: Args, ctx: CommandContext) -> Result<Self, CommandError> {
+    pub async fn run(path: PathBuf, args: Args, ctx: CommandContext) -> Result<Self, CommandError> {
         let mut command = tokio::process::Command::new(&path);
 
+        command.current_dir(ctx.current_dir().await);
         command.args(&args.values);
 
         let has_stderr_adapter = if ctx.stderr.is_some() {

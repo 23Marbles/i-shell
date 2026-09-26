@@ -121,7 +121,7 @@ builtin_list!(
     };
 
     PWD = "pwd" |mut ctx, args| {
-        btry!(ctx.println(ctx.shell(|shell| shell.cwd.to_path_buf()).await.display()).await);
+        btry!(ctx.println(ctx.current_dir().await.display()).await);
         Ok(CommandResult::Continue)
     };
 
@@ -143,7 +143,7 @@ builtin_list!(
         } else {
             let components = join_path.components();
 
-            let mut pathbuf = ctx.shell(|shell| shell.cwd.clone()).await;
+            let mut pathbuf = ctx.current_dir().await;
 
             for component in components {
                 match component {

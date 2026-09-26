@@ -1,6 +1,9 @@
-use std::{fmt::Display, ops::{Deref, DerefMut}, process::ExitStatus};
-
-use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
+use std::{
+    fmt::Display,
+    ops::{Deref, DerefMut},
+    path::PathBuf,
+    process::ExitStatus,
+};
 
 use crate::{
     codec::{WireDecode, WireEncode},
@@ -121,6 +124,11 @@ impl CommandContext {
 
             Ok(())
         }
+    }
+
+    #[inline(always)]
+    pub async fn current_dir(&self) -> PathBuf {
+        self.shell_handle.handle.read().await.cwd.clone()
     }
 
     pub async fn send_stdout<T: WireEncode>(
