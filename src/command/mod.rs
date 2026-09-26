@@ -149,17 +149,25 @@ pub enum CommandResult {
 
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "{cmd_name}: {}: {kind}",
-    .cmd_args.values.iter().enumerate().map( |(i, s)|
-        if &Some(i) == .offending_arg {
-            format!("\x1b[1m{s}\x1b[22m ")
+    "{cmd_name}: {}{kind}",
+    {
+        let args = .cmd_args.values.iter().enumerate().map( |(i, s)|
+            if &Some(i) == .offending_arg {
+                format!("\x1b[1m{s}\x1b[22m ")
+            } else {
+                format!("{s} ")
+            })
+            .collect::<String>();
+
+        let args = args.trim_end();
+
+        if args.is_empty() {
+            String::new()
         } else {
-            format!("{s} ")
-        })
-        .collect::<String>()
-        .trim_end()
-    )
-]
+            format!("{args}: ")
+        }
+    }
+)]
 pub struct CommandError {
     cmd_name: String,
     cmd_args: Args,
