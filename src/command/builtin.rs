@@ -81,7 +81,7 @@ macro_rules! builtin_list {
                                 $name,
                                 $args.clone(),
                                 $err,
-                            ));
+                            ))
                         }
                     }
                     $cmd
@@ -94,7 +94,13 @@ macro_rules! builtin_list {
 }
 
 builtin_list!(
-    EXIT = "exit" | mut _ctx, _ | { Ok(CommandResult::Exit(0)) };
+    EXIT = "exit" | mut _ctx, args | { match args.values.get(0) {
+        Some(code_s) => match code_s.parse() {
+            Ok(code) => Ok(CommandResult::Exit(code)),
+            Err(e) => err!(e.to_string() => args()),
+        },
+        None => Ok(CommandResult::Exit(0)),
+    } };
 
     ECHO = "echo" | mut ctx, args| {
         btry!(ctx.println(args.values.join(" ")).await);
