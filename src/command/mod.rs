@@ -5,7 +5,7 @@ use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard};
 use crate::{
     codec::{WireDecode, WireEncode},
     shell::{Shell, ShellHandle},
-    streams::{StreamReceiveError, StreamRx, StreamSendError, StreamTx},
+    streams::{StreamReceiveError, StreamRx, StreamSendError, StreamTx, adapter::AdapterError},
 };
 
 #[derive(Debug, Clone)]
@@ -191,7 +191,8 @@ command_error_kinds_impl!(
     send_error -> SendError(StreamSendError),
     recv_error -> RecvError(StreamReceiveError),
     other -> Other(String),
-    child_exit_err -> ChildExitErr(ExitStatus)
+    child_exit_err -> ChildExitErr(ExitStatus),
+    adapter_err -> AdapterErr(AdapterError)
 );
 
 #[derive(Debug, thiserror::Error)]
@@ -211,6 +212,8 @@ pub enum CommandErrorKind {
 
     #[error("{0}")]
     ChildExitErr(ExitStatus),
+    #[error("adapter failed: {0}")]
+    AdapterErr(#[from] AdapterError),
 }
 
 pub trait IntoCommandError {
