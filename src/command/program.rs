@@ -33,6 +33,7 @@ impl Program {
             command.stderr(Stdio::piped());
             true
         } else {
+            command.stderr(Stdio::inherit());
             false
         };
 
@@ -40,6 +41,7 @@ impl Program {
             command.stdout(Stdio::piped());
             true
         } else {
+            command.stdout(Stdio::inherit());
             false
         };
 
@@ -47,6 +49,7 @@ impl Program {
             command.stdin(Stdio::piped());
             true
         } else {
+            command.stdin(Stdio::inherit());
             false
         };
 

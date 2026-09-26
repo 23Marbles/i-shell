@@ -119,10 +119,12 @@ impl InteractiveShell {
             )) {
                 Ok(s) => {
                     self.editor.add_history_entry(&s)?;
-                    Ok(s)
+                    s
                 }
-                Err(e) => Err(e),
-            }?;
+                Err(ReadlineError::Eof) => return Ok(()),
+                Err(ReadlineError::Interrupted) => {println!("Recieved interrupt"); continue;},
+                Err(e) => return Err(e),
+            };
 
             let pipeline = Pipeline::try_from(line).unwrap();
 
