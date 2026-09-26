@@ -11,7 +11,7 @@ pub mod streams;
 
 #[tokio::main]
 async fn main() -> Result<(), ReadlineError> {
-    let shell = Shell::spawn();
+    let shell = Shell::interactive();
 
     shell.run().await
 }

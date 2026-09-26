@@ -35,7 +35,6 @@ impl From<Shell> for ShellHandle {
 pub struct Shell {
     pub cwd: PathBuf,
     builtins: Builtins,
-    editor: Editor<LineHelper, DefaultHistory>,
 }
 
 impl Default for Shell {
@@ -48,7 +47,6 @@ impl Default for Shell {
                 panic!()
             }),
             builtins: Builtins::from_builtins(BUILTINS),
-            editor: Editor::new().unwrap(),
         }
     }
 }
@@ -74,20 +72,22 @@ impl Shell {
         self.resolve_program(program_name).is_some()
     }
 
-    pub fn spawn() -> ShellRunner {
-        ShellRunner {
+    pub fn interactive() -> InteractiveShell {
+        InteractiveShell {
             shell_handle: ShellHandle {
                 handle: Arc::new(RwLock::new(Self::default())),
             },
+            editor: Editor::new().unwrap(),
         }
     }
 }
 
-pub struct ShellRunner {
+pub struct InteractiveShell {
     shell_handle: ShellHandle,
+    editor: Editor<LineHelper, DefaultHistory>,
 }
 
-impl ShellRunner {
+impl InteractiveShell {
     #[must_use]
     pub async fn shell<R>(&self, func: impl FnOnce(&Shell) -> R) -> R {
         (func)(self.shell_handle.handle.read().await.deref())
@@ -100,15 +100,13 @@ impl ShellRunner {
 
     pub async fn run(mut self) -> Result<(), ReadlineError> {
         loop {
-            let line = self
-                .shell_mut(|this| match this.editor.readline(">> ") {
-                    Ok(s) => {
-                        this.editor.add_history_entry(&s)?;
-                        Ok(s)
-                    }
-                    Err(e) => Err(e),
-                })
-                .await?;
+            let line = match self.editor.readline(">> ") {
+                Ok(s) => {
+                    self.editor.add_history_entry(&s)?;
+                    Ok(s)
+                }
+                Err(e) => Err(e),
+            }?;
 
             let pipeline = Pipeline::try_from(line).unwrap();
 
