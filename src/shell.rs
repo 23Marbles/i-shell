@@ -74,7 +74,7 @@ impl Shell {
         self.resolve_program(program_name).is_some()
     }
 
-    pub fn new() -> ShellRunner {
+    pub fn spawn() -> ShellRunner {
         ShellRunner {
             shell_handle: ShellHandle {
                 handle: Arc::new(RwLock::new(Self::default())),
@@ -129,7 +129,7 @@ impl ShellRunner {
 
             Ok(CommandResult::Continue)
         } else {
-            return Err(CommandError::not_found(name.clone(), args, name));
+            Err(CommandError::not_found(name.clone(), args, name))
         }
     }
 }

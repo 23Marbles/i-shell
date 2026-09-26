@@ -21,7 +21,7 @@ impl TryFrom<String> for Pipeline {
             cmd: CommandSpec {
                 name: cmd_name.to_string(),
                 args: Args {
-                    values: args.into_iter().map(|s| s.to_string()).collect(),
+                    values: args.iter().map(|s| s.to_string()).collect(),
                 },
             },
         })
