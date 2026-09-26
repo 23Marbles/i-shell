@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsString,
     ops::{Deref, DerefMut},
     path::PathBuf,
     sync::Arc,
@@ -100,7 +101,22 @@ impl InteractiveShell {
 
     pub async fn run(mut self) -> Result<(), ReadlineError> {
         loop {
-            let line = match self.editor.readline(">> ") {
+            let line = match self.editor.readline(&format!(
+                "{}>> ",
+                self.shell(|shell| {
+                    #[cfg(target_os = "windows")]
+                    return shell.cwd.clone().into_os_string();
+
+                    #[cfg(not(target_os = "windows"))]
+                    return shell
+                        .cwd
+                        .to_path_buf()
+                        .file_name()
+                        .map_or(OsString::new(), |n| n.to_os_string());
+                })
+                .await
+                .display()
+            )) {
                 Ok(s) => {
                     self.editor.add_history_entry(&s)?;
                     Ok(s)
