@@ -4,6 +4,7 @@ use crate::shell::Shell;
 
 pub mod codec;
 pub mod command;
+pub mod connections;
 pub mod parse;
 pub mod read;
 pub mod shell;
