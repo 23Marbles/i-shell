@@ -1,3 +1,3 @@
 [workspace]
 resolver = "3"
-members = ["crates/shell-cli","crates/shell-core"]
+members = ["crates/shell-cli", "crates/shell-connection","crates/shell-core", "crates/shell-daemon", "crates/shell-headless"]
