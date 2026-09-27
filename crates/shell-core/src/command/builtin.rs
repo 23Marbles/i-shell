@@ -1,6 +1,8 @@
-use std::{collections::HashMap, path::PathBuf, pin::Pin};
+use std::{collections::HashMap, path::PathBuf, pin::Pin, process::ExitCode};
 
-use crate::command::{Args, CommandContext, CommandError, CommandErrorKind, CommandResult};
+use crate::command::{
+    Args, CommandError, CommandErrorKind, CommandResult, context::CommandContext,
+};
 
 pub type BuiltinFuture = Pin<Box<dyn Future<Output = Result<CommandResult, CommandError>> + Send>>;
 
@@ -95,11 +97,11 @@ macro_rules! builtin_list {
 
 builtin_list!(
     EXIT = "exit" | mut _ctx, args | { match args.values.get(0) {
-        Some(code_s) => match code_s.parse() {
-            Ok(code) => Ok(CommandResult::Exit(code)),
+        Some(code_s) => match u8::from_str_radix(code_s, 10) {
+            Ok(code) => Ok(CommandResult::Exit(ExitCode::from(code))),
             Err(e) => err!(e.to_string() => args()),
         },
-        None => Ok(CommandResult::Exit(0)),
+        None => Ok(CommandResult::Exit(ExitCode::SUCCESS)),
     } };
 
     ECHO = "echo" | mut ctx, args| {

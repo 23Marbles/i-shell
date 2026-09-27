@@ -1,7 +1,7 @@
 use tokio::{select, task::JoinSet};
 
 use crate::{
-    command::{Args, CommandContext, CommandError, IntoCommandError},
+    command::{Args, CommandError, IntoCommandError, context::CommandContext},
     streams::adapter::{AdapterError, Blank, StreamAdapter},
 };
 use std::{
