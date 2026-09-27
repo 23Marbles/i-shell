@@ -122,7 +122,10 @@ impl InteractiveShell {
                     s
                 }
                 Err(ReadlineError::Eof) => return Ok(()),
-                Err(ReadlineError::Interrupted) => {println!("Recieved interrupt"); continue;},
+                Err(ReadlineError::Interrupted) => {
+                    println!("\x1b[31m^C\x1b[0m");
+                    continue;
+                }
                 Err(e) => return Err(e),
             };
 
