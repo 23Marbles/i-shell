@@ -1,5 +1,4 @@
 use std::{
-    ffi::OsString,
     ops::{Deref, DerefMut},
     path::PathBuf,
     sync::Arc,
@@ -112,7 +111,7 @@ impl InteractiveShell {
                         .cwd
                         .to_path_buf()
                         .file_name()
-                        .map_or(OsString::new(), |n| n.to_os_string());
+                        .map_or(std::ffi::OsString::new(), |n| n.to_os_string());
                 })
                 .await
                 .display()
