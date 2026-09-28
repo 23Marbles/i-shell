@@ -349,6 +349,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "pathsearch",
+ "serde",
  "thiserror",
  "tokio",
  "tokio-util",
@@ -364,6 +365,7 @@ version = "0.1.0"
 dependencies = [
  "shell-connection",
  "shell-core",
+ "thiserror",
  "tokio",
 ]
 

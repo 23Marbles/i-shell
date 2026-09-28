@@ -9,6 +9,7 @@ use crate::{
     streams::{StreamReceiveError, StreamSendError, adapter::AdapterError},
 };
 
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Debug, Clone)]
 pub struct Args {
     pub values: Vec<String>,
@@ -22,6 +23,8 @@ pub struct Pipeline {
     pub cmd: Command,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[derive(Debug)]
 pub struct Command {
     pub name: String,
     pub args: Args,
@@ -163,6 +166,101 @@ impl<T: Into<CommandErrorKind>> IntoCommandError for T {
             cmd_args,
             offending_arg: None,
             kind: self.into(),
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+pub mod wire {
+    use std::fmt::Display;
+
+    use super::*;
+
+    #[derive(Debug, thiserror::Error, serde::Serialize, serde::Deserialize)]
+    #[error(
+    "{cmd_name}: {}{kind}",
+        {
+            let args = .cmd_args.values.iter().enumerate().map( |(i, s)|
+                if &Some(i) == .offending_arg {
+                    format!("\x1b[1m{s}\x1b[22m ")
+                } else {
+                    format!("{s} ")
+                })
+                .collect::<String>();
+
+            let args = args.trim_end();
+
+            if args.is_empty() {
+                String::new()
+            } else {
+                format!("{args}: ")
+            }
+        }
+    )]
+    pub struct WireCommandError {
+        cmd_name: String,
+        cmd_args: Args,
+        offending_arg: Option<usize>,
+        kind: WireCommandErrorKind,
+    }
+
+    impl From<CommandError> for WireCommandError {
+        fn from(value: CommandError) -> Self {
+            let CommandError {
+                cmd_name,
+                cmd_args,
+                offending_arg,
+                kind,
+            } = value;
+
+            Self {
+                cmd_name,
+                cmd_args,
+                offending_arg,
+                kind: kind.into(),
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    pub enum WireCommandErrorKind {
+        Args(String),
+        Io(String),
+        NotFound(String),
+        SendError(String),
+        RecvError(String),
+        Other(String),
+        ChildExitErr(i32),
+        AdapterErr(String),
+    }
+
+    impl Display for WireCommandErrorKind {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                WireCommandErrorKind::Args(s)
+                | WireCommandErrorKind::Io(s)
+                | WireCommandErrorKind::NotFound(s)
+                | WireCommandErrorKind::SendError(s)
+                | WireCommandErrorKind::RecvError(s)
+                | WireCommandErrorKind::Other(s)
+                | WireCommandErrorKind::AdapterErr(s) => write!(f, "{s}"),
+                WireCommandErrorKind::ChildExitErr(c) => write!(f, "{c}"),
+            }
+        }
+    }
+
+    impl From<CommandErrorKind> for WireCommandErrorKind {
+        fn from(err: CommandErrorKind) -> Self {
+            match err {
+                CommandErrorKind::Args(e) => Self::Args(e),
+                CommandErrorKind::Io(e) => Self::Io(e.to_string()),
+                CommandErrorKind::NotFound(e) => Self::NotFound(e),
+                CommandErrorKind::SendError(e) => Self::SendError(e.to_string()),
+                CommandErrorKind::RecvError(e) => Self::RecvError(e.to_string()),
+                CommandErrorKind::Other(e) => Self::Other(e),
+                CommandErrorKind::ChildExitErr(e) => Self::ChildExitErr(e.code().unwrap_or(-1)),
+                CommandErrorKind::AdapterErr(e) => Self::AdapterErr(e.to_string()),
+            }
         }
     }
 }
