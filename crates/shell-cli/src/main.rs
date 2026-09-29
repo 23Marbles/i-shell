@@ -59,7 +59,7 @@ async fn main() -> Result<ExitCode, ReadlineError> {
 
         match cmd.run(ctx).await {
             Ok(CommandResult::Continue) => (),
-            Ok(CommandResult::Exit(c)) => return Ok(c),
+            Ok(CommandResult::Exit(c)) => return Ok(ExitCode::from(c)),
             Err(e) => eprintln!("{e}"),
         }
     }

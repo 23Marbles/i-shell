@@ -1,25 +1,15 @@
-use std::{
-    net::SocketAddr,
-    process::{ExitCode, ExitStatus},
-};
+use std::{net::SocketAddr, process::ExitCode};
 
 use async_result_ext::AsyncResultExt;
 use shell_connection::control::{
-    CommandId, ControlConnection, ControlKind, ControlMessage, Negotiating, NegotiationError,
-    Remote, RemoteMessage,
+    ControlConnection, ControlKind, ControlMessage, Negotiating, NegotiationError, Remote,
+    RemoteCommandError, RemoteMessage, StreamKind,
 };
 use shell_core::{
     command::{Command, CommandError, CommandResult, context::CommandContext},
     shell::{Shell, ShellHandle},
 };
 use tokio::net::{TcpSocket, TcpStream};
-
-#[derive(Debug)]
-pub enum StreamKind {
-    Stdin,
-    Stdout,
-    Stderr,
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -33,6 +23,19 @@ pub enum Error {
         kind: StreamKind,
         err: std::io::Error,
     },
+}
+
+impl From<Error> for RemoteCommandError {
+    fn from(value: Error) -> Self {
+        match value {
+            Error::IoErr(error) => Self::IoErr(error.to_string()),
+            Error::CommandError(command_error) => Self::CommandError(command_error.into()),
+            Error::CreateStreamErr { kind, err } => Self::CreateStreamErr {
+                kind,
+                err: err.to_string(),
+            },
+        }
+    }
 }
 
 pub trait HeadlessState {
@@ -70,8 +73,8 @@ impl HeadlessShell<Waiting> {
 }
 
 impl HeadlessShell<Connected> {
-    pub async fn run(mut self) -> Result<ExitStatus, Error> {
-        let (exit_stat, cmd_id) = loop {
+    pub async fn run(mut self) -> Result<ExitCode, Error> {
+        let (exit_code, cmd_id) = loop {
             let cmd = self.stream.recv_cmd().await?;
 
             match cmd {
@@ -81,22 +84,29 @@ impl HeadlessShell<Connected> {
                     stdin,
                     stdout,
                     stderr,
-                } => match &self.run_cmd(cmd, stdin, stdout, stderr).await {
+                } => match self.run_cmd(cmd, stdin, stdout, stderr).await {
                     Ok(CommandResult::Continue) => (),
-                    Ok(CommandResult::Exit(c)) => break (*c, id),
-                    Err(e) => {}
+                    Ok(CommandResult::Exit(c)) => break (c, id),
+                    Err(e) => {
+                        self.stream
+                            .send_msg(RemoteMessage::CommandError {
+                                err: e.into(),
+                                cmd_id: id,
+                            })
+                            .await?;
+                    }
                 },
             }
         };
 
         self.stream
             .send_msg(RemoteMessage::Exit {
-                code: exit_stat.code().unwrap_or(-1),
+                code: exit_code as u32,
                 cmd_id,
             })
             .await?;
 
-        Ok(exit_stat)
+        Ok(ExitCode::from(exit_code))
     }
 
     pub async fn run_cmd(

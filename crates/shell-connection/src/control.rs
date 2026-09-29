@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use shell_core::command::{Command, wire::WireCommandError};
-use std::{io, marker::PhantomData, net::SocketAddr};
+use std::{fmt::Display, io, marker::PhantomData, net::SocketAddr};
 use tokio::net::TcpStream;
 
 use crate::{read_msg, write_msg};
@@ -29,14 +29,45 @@ pub struct Remote;
 impl ControlKind for Remote {}
 
 #[derive(Debug, Serialize, Deserialize)]
+pub enum StreamKind {
+    Stdin,
+    Stdout,
+    Stderr,
+}
+
+impl Display for StreamKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StreamKind::Stdin => write!(f, "stdin"),
+            StreamKind::Stdout => write!(f, "stdout"),
+            StreamKind::Stderr => write!(f, "stderr"),
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error, Serialize, Deserialize)]
+pub enum RemoteCommandError {
+    #[error("{0}")]
+    IoErr(String),
+    #[error(transparent)]
+    CommandError(#[from] WireCommandError),
+
+    #[error("Failed creating {kind} stream: {err}")]
+    CreateStreamErr {
+        kind: StreamKind,
+        err: String,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub enum RemoteMessage {
     CommandError {
-        err: WireCommandError,
+        err: RemoteCommandError,
         cmd_id: CommandId,
     },
 
     Exit {
-        code: i32,
+        code: u32,
         cmd_id: CommandId,
     },
 }

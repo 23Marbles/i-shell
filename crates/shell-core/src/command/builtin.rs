@@ -1,6 +1,5 @@
 use std::{
-    collections::HashMap, os::windows::process::ExitStatusExt, path::PathBuf, pin::Pin,
-    process::ExitStatus,
+    collections::HashMap, path::PathBuf, pin::Pin,
 };
 
 use crate::command::{
@@ -100,11 +99,11 @@ macro_rules! builtin_list {
 
 builtin_list!(
     EXIT = "exit" | mut _ctx, args | { match args.values.get(0) {
-        Some(code_s) => match u32::from_str_radix(code_s, 10) {
-            Ok(code) => Ok(CommandResult::Exit(ExitStatus::from_raw(code))),
+        Some(code_s) => match u8::from_str_radix(code_s, 10) {
+            Ok(code) => Ok(CommandResult::Exit(code)),
             Err(e) => err!(e.to_string() => args()),
         },
-        None => Ok(CommandResult::Exit(ExitStatus::from_raw(0))),
+        None => Ok(CommandResult::Exit(0)),
     } };
 
     ECHO = "echo" | mut ctx, args| {
