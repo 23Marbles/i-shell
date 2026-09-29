@@ -1,19 +1,38 @@
-use std::process::ExitCode;
+use std::{
+    net::SocketAddr,
+    process::{ExitCode, ExitStatus},
+};
 
+use async_result_ext::AsyncResultExt;
 use shell_connection::control::{
-    ControlConnection, ControlKind, ControlMessage, Negotiating, NegotiationError, Remote,
-    ResponseMessage,
+    CommandId, ControlConnection, ControlKind, ControlMessage, Negotiating, NegotiationError,
+    Remote, RemoteMessage,
 };
 use shell_core::{
-    command::{Command, CommandResult, context::CommandContext},
+    command::{Command, CommandError, CommandResult, context::CommandContext},
     shell::{Shell, ShellHandle},
 };
-use tokio::net::TcpStream;
+use tokio::net::{TcpSocket, TcpStream};
+
+#[derive(Debug)]
+pub enum StreamKind {
+    Stdin,
+    Stdout,
+    Stderr,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
     IoErr(#[from] std::io::Error),
+    #[error(transparent)]
+    CommandError(#[from] CommandError),
+
+    #[error("")]
+    CreateStreamErr {
+        kind: StreamKind,
+        err: std::io::Error,
+    },
 }
 
 pub trait HeadlessState {
@@ -51,47 +70,100 @@ impl HeadlessShell<Waiting> {
 }
 
 impl HeadlessShell<Connected> {
-    pub async fn run(self) -> Result<ExitCode, Error> {
-        let Self {
-            mut stream,
-            shell_handle,
-        } = self;
-
-        loop {
-            let cmd = stream.recv_cmd().await?;
+    pub async fn run(mut self) -> Result<ExitStatus, Error> {
+        let (exit_stat, cmd_id) = loop {
+            let cmd = self.stream.recv_cmd().await?;
 
             match cmd {
-                ControlMessage::RunCommand { cmd, id } => {
-                    let cmd = match Command::from(cmd).resolve(&shell_handle).await {
-                        Ok(c) => c,
-                        Err(e) => {
-                            stream
-                                .send_response(ResponseMessage::CommandError {
-                                    err: e.into(),
-                                    cmd_id: id,
-                                })
-                                .await?;
-
-                            continue;
-                        }
-                    };
-
-                    let ctx = CommandContext::new(&shell_handle);
-
-                    match cmd.run(ctx).await {
-                        Ok(CommandResult::Continue) => (),
-                        Ok(CommandResult::Exit(c)) => return Ok(c),
-                        Err(e) => {
-                            stream
-                                .send_response(ResponseMessage::CommandError {
-                                    err: e.into(),
-                                    cmd_id: id,
-                                })
-                                .await?
-                        }
-                    };
-                }
+                ControlMessage::RunCommand {
+                    cmd,
+                    id,
+                    stdin,
+                    stdout,
+                    stderr,
+                } => match &self.run_cmd(cmd, stdin, stdout, stderr).await {
+                    Ok(CommandResult::Continue) => (),
+                    Ok(CommandResult::Exit(c)) => break (*c, id),
+                    Err(e) => {}
+                },
             }
+        };
+
+        self.stream
+            .send_msg(RemoteMessage::Exit {
+                code: exit_stat.code().unwrap_or(-1),
+                cmd_id,
+            })
+            .await?;
+
+        Ok(exit_stat)
+    }
+
+    pub async fn run_cmd(
+        &self,
+        cmd: Command,
+        stdin: SocketAddr,
+        stdout: SocketAddr,
+        stderr: SocketAddr,
+    ) -> Result<CommandResult, Error> {
+        let stdin = match if stdin.is_ipv4() {
+            TcpSocket::new_v4()
+        } else {
+            TcpSocket::new_v6()
         }
+        .async_and_then(async |sock| sock.connect(stdin).await)
+        .await
+        {
+            Ok(stream) => stream,
+            Err(err) => {
+                return Err(Error::CreateStreamErr {
+                    kind: StreamKind::Stdin,
+                    err,
+                });
+            }
+        };
+
+        let stdout = match if stdout.is_ipv4() {
+            TcpSocket::new_v4()
+        } else {
+            TcpSocket::new_v6()
+        }
+        .async_and_then(async |sock| sock.connect(stdout).await)
+        .await
+        {
+            Ok(stream) => stream,
+            Err(err) => {
+                return Err(Error::CreateStreamErr {
+                    kind: StreamKind::Stdout,
+                    err,
+                });
+            }
+        };
+
+        let stderr = match if stderr.is_ipv4() {
+            TcpSocket::new_v4()
+        } else {
+            TcpSocket::new_v6()
+        }
+        .async_and_then(async |sock| sock.connect(stderr).await)
+        .await
+        {
+            Ok(stream) => stream,
+            Err(err) => {
+                return Err(Error::CreateStreamErr {
+                    kind: StreamKind::Stderr,
+                    err,
+                });
+            }
+        };
+
+        let cmd = Command::from(cmd).resolve(&self.shell_handle).await?;
+
+        let ctx = CommandContext::new(&self.shell_handle)
+            .with_stdin(stdin.into())
+            .with_stdout(stdout.into())
+            .with_stderr(stderr.into());
+
+        Ok(cmd.run(ctx).await?)
     }
 }

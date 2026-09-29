@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use shell_core::command::{Command, wire::WireCommandError};
-use std::{io, marker::PhantomData};
+use std::{io, marker::PhantomData, net::SocketAddr};
 use tokio::net::TcpStream;
 
 use crate::{read_msg, write_msg};
@@ -16,16 +16,27 @@ pub struct CommandId(u32);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ControlMessage {
-    RunCommand { cmd: Command, id: CommandId },
+    RunCommand {
+        cmd: Command,
+        stdin: SocketAddr,
+        stdout: SocketAddr,
+        stderr: SocketAddr,
+        id: CommandId,
+    },
 }
 
 pub struct Remote;
 impl ControlKind for Remote {}
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum ResponseMessage {
+pub enum RemoteMessage {
     CommandError {
         err: WireCommandError,
+        cmd_id: CommandId,
+    },
+
+    Exit {
+        code: i32,
         cmd_id: CommandId,
     },
 }
@@ -57,16 +68,13 @@ impl ControlConnection<Remote> {
 }
 
 impl ControlConnection<Remote> {
-    pub async fn send_response(
-        &mut self,
-        cmd: impl Into<ResponseMessage>,
-    ) -> Result<(), io::Error> {
+    pub async fn send_msg(&mut self, cmd: impl Into<RemoteMessage>) -> Result<(), io::Error> {
         write_msg(&mut self.stream, &cmd.into()).await
     }
 }
 
 impl ControlConnection<Controller> {
-    pub async fn recv_response(&mut self) -> Result<ResponseMessage, io::Error> {
+    pub async fn recv_response(&mut self) -> Result<RemoteMessage, io::Error> {
         read_msg(&mut self.stream).await
     }
 }

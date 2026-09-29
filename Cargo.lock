@@ -9,6 +9,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "async-result-ext"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f677b0c1179b6c83e0af9af70397c2872156c0637a804a4f45b3a9dab61f0f5d"
+
+[[package]]
 name = "async-trait"
 version = "0.1.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -363,6 +369,7 @@ version = "0.1.0"
 name = "shell-headless"
 version = "0.1.0"
 dependencies = [
+ "async-result-ext",
  "shell-connection",
  "shell-core",
  "thiserror",

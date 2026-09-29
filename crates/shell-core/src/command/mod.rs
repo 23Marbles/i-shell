@@ -1,7 +1,4 @@
-use std::{
-    path::PathBuf,
-    process::{ExitCode, ExitStatus},
-};
+use std::{path::PathBuf, process::ExitStatus};
 
 use crate::{
     command::{builtin::BuiltinFunc, context::CommandContext, program::Program},
@@ -75,7 +72,7 @@ impl ResolvedCommand {
 
 pub enum CommandResult {
     Continue,
-    Exit(ExitCode),
+    Exit(ExitStatus),
 }
 
 #[derive(Debug, thiserror::Error)]
