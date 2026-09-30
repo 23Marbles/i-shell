@@ -1,7 +1,6 @@
 use std::{fmt::Display, path::PathBuf};
 
 use crate::{
-    codec::{WireDecode, WireEncode},
     shell::{Shell, ShellHandle},
     streams::{StreamReceiveError, StreamRx, StreamSendError, StreamTx},
 };
@@ -55,7 +54,7 @@ impl CommandContext {
 
     pub async fn print<T: Display>(&mut self, v: T) -> Result<(), StreamSendError> {
         if let Some(ref mut out) = self.stdout {
-            out.send(v.to_string()).await
+            out.send(v.to_string().into_bytes()).await
         } else {
             print!("{v}");
 
@@ -65,7 +64,7 @@ impl CommandContext {
 
     pub async fn println<T: Display>(&mut self, v: T) -> Result<(), StreamSendError> {
         if let Some(ref mut out) = self.stdout {
-            out.send(format!("{v}\n")).await
+            out.send(format!("{v}\n").into_bytes()).await
         } else {
             println!("{v}");
 
@@ -75,7 +74,7 @@ impl CommandContext {
 
     pub async fn eprint<T: Display>(&mut self, v: T) -> Result<(), StreamSendError> {
         if let Some(ref mut err) = self.stderr {
-            err.send(v.to_string()).await
+            err.send(v.to_string().into_bytes()).await
         } else {
             eprint!("{v}");
 
@@ -85,7 +84,7 @@ impl CommandContext {
 
     pub async fn eprintln<T: Display>(&mut self, v: T) -> Result<(), StreamSendError> {
         if let Some(ref mut err) = self.stderr {
-            err.send(format!("{v}\n")).await
+            err.send(format!("{v}\n").into_bytes()).await
         } else {
             eprintln!("{v}");
 
@@ -98,21 +97,15 @@ impl CommandContext {
         self.shell_handle.handle.read().await.cwd.clone()
     }
 
-    pub async fn send_stdout<T: WireEncode>(
-        &mut self,
-        v: T,
-    ) -> Option<Result<(), StreamSendError>> {
+    pub async fn send_stdout(&mut self, v: Vec<u8>) -> Option<Result<(), StreamSendError>> {
         Some(self.stdout.as_mut()?.send(v).await)
     }
 
-    pub async fn send_stderr<T: WireEncode>(
-        &mut self,
-        v: T,
-    ) -> Option<Result<(), StreamSendError>> {
+    pub async fn send_stderr(&mut self, v: Vec<u8>) -> Option<Result<(), StreamSendError>> {
         Some(self.stderr.as_mut()?.send(v).await)
     }
 
-    pub async fn recv_stdin<T: WireDecode>(&mut self) -> Option<Result<T, StreamReceiveError>> {
+    pub async fn recv_stdin(&mut self) -> Option<Result<Vec<u8>, StreamReceiveError>> {
         Some(self.stdin.as_mut()?.recv().await)
     }
 }

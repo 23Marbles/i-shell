@@ -2,7 +2,7 @@ use tokio::{select, task::JoinSet};
 
 use crate::{
     command::{Args, CommandError, IntoCommandError, context::CommandContext},
-    streams::adapter::{AdapterError, Blank, StreamAdapter},
+    streams::adapter::{AdapterError, RawToWireBytes, StreamAdapter, WireBytesToRaw},
 };
 use std::{
     path::PathBuf,
@@ -17,9 +17,9 @@ pub struct Program {
 }
 
 pub struct Adapters {
-    stdout_adapter: Option<StreamAdapter<Blank>>,
-    stderr_adapter: Option<StreamAdapter<Blank>>,
-    stdin_adapter: Option<StreamAdapter<Blank>>,
+    stdout_adapter: Option<StreamAdapter<RawToWireBytes>>,
+    stderr_adapter: Option<StreamAdapter<RawToWireBytes>>,
+    stdin_adapter: Option<StreamAdapter<WireBytesToRaw>>,
 }
 
 impl Program {
@@ -60,15 +60,15 @@ impl Program {
 
         let stdin_adapter = has_stdin_adapter.then(|| {
             let stdin = child.stdin.take().expect("Just set the stdin as piped");
-            StreamAdapter::<Blank>::spawn(ctx.stdin.unwrap(), stdin.into())
+            StreamAdapter::<WireBytesToRaw>::spawn(ctx.stdin.unwrap(), stdin.into())
         });
         let stdout_adapter = has_stdout_adapter.then(|| {
             let stdout = child.stdout.take().expect("Just set the stdout as piped");
-            StreamAdapter::<Blank>::spawn(stdout.into(), ctx.stdout.unwrap())
+            StreamAdapter::<RawToWireBytes>::spawn(stdout.into(), ctx.stdout.unwrap())
         });
         let stderr_adapter = has_stderr_adapter.then(|| {
             let stderr = child.stderr.take().expect("Just set the stderr as piped");
-            StreamAdapter::<Blank>::spawn(stderr.into(), ctx.stderr.unwrap())
+            StreamAdapter::<RawToWireBytes>::spawn(stderr.into(), ctx.stderr.unwrap())
         });
 
         Ok(Self {
@@ -92,12 +92,16 @@ impl Program {
             stdin_adapter,
         } = self.adapters;
 
-        for adapter in [stdout_adapter, stderr_adapter, stdin_adapter]
-            .into_iter()
-            .flatten()
-        {
-            let handle = adapter.into_join_handle();
+        let stdin_cancel = stdin_adapter
+            .as_ref()
+            .map(StreamAdapter::cancellation_token);
+        let adapter_handles = [
+            stdout_adapter.map(StreamAdapter::into_join_handle),
+            stderr_adapter.map(StreamAdapter::into_join_handle),
+            stdin_adapter.map(StreamAdapter::into_join_handle),
+        ];
 
+        for handle in adapter_handles.into_iter().flatten() {
             adapter_tasks.spawn(async move {
                 handle.await??;
                 Ok(())
@@ -114,6 +118,9 @@ impl Program {
                     match child_res {
                         Ok(status) => {
                             child_status = Some(status);
+                            if let Some(cancel) = &stdin_cancel {
+                                cancel.cancel();
+                            }
                         }
                         Err(e) => {
                             adapter_tasks.abort_all();

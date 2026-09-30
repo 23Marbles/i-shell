@@ -45,9 +45,9 @@ impl Header {
     pub fn encode_bytes(self) -> bytes::Bytes {
         let mut buf = Vec::new();
 
-        buf.copy_from_slice(&self.type_id.as_u32().to_be_bytes());
+        buf.extend_from_slice(&self.type_id.as_u32().to_be_bytes());
 
-        buf.copy_from_slice(&(self.length as u32).to_be_bytes());
+        buf.extend_from_slice(&(self.length as u32).to_be_bytes());
 
         buf.into()
     }

@@ -87,6 +87,10 @@ pub trait StreamReceiver: Send {
         while !left.is_empty() {
             let taken = self.recv(left).await?;
 
+            if taken == 0 {
+                return Err(StreamReceiveError::SenderClosed);
+            }
+
             (_, left) = left.split_at_mut(taken);
         }
 
@@ -107,6 +111,16 @@ pub enum StreamReceiveError {
 }
 
 impl StreamRx {
+    pub async fn recv_chunk(&mut self, buf: &mut [u8]) -> Result<usize, StreamReceiveError> {
+        let len = self.inner.recv(buf).await?;
+
+        if len == 0 {
+            return Err(StreamReceiveError::SenderClosed);
+        }
+
+        Ok(len)
+    }
+
     pub async fn recv<T: WireDecode>(&mut self) -> Result<T, StreamReceiveError> {
         let mut header_buf = [0u8; 8];
         self.inner.recv_exact(&mut header_buf).await?;
@@ -131,5 +145,38 @@ impl StreamRx {
         self.inner.recv_exact(&mut buf).await?;
 
         Ok((header, buf.into()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{StreamReceiveError, StreamReceiver, StreamRx};
+    use tokio::io::{AsyncWriteExt, duplex};
+
+    #[tokio::test]
+    async fn recv_exact_reports_eof() {
+        let (writer, mut reader) = duplex(8);
+        drop(writer);
+
+        let error = reader.recv_exact(&mut [0; 8]).await.unwrap_err();
+
+        assert!(matches!(error, StreamReceiveError::SenderClosed));
+    }
+
+    #[tokio::test]
+    async fn recv_chunk_preserves_unframed_bytes_and_reports_eof() {
+        let (mut writer, reader) = duplex(8);
+        writer.write_all(b"hello").await.unwrap();
+        drop(writer);
+
+        let mut receiver = StreamRx::from(reader);
+        let mut buf = [0; 8];
+        let len = receiver.recv_chunk(&mut buf).await.unwrap();
+
+        assert_eq!(&buf[..len], b"hello");
+        assert!(matches!(
+            receiver.recv_chunk(&mut buf).await,
+            Err(StreamReceiveError::SenderClosed)
+        ));
     }
 }

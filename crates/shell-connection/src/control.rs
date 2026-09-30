@@ -80,6 +80,10 @@ pub enum RemoteMessage {
         stderr: SocketAddr,
         cmd_id: CommandId,
     },
+
+    CommandFinished {
+        cmd_id: CommandId,
+    },
 }
 
 pub struct ControlConnection<K: ControlKind> {

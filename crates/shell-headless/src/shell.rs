@@ -85,7 +85,11 @@ impl HeadlessShell<Connected> {
                     stdout,
                     stderr,
                 } => match self.run_cmd(cmd, stdin, stdout, stderr, id).await {
-                    Ok(CommandResult::Continue) => (),
+                    Ok(CommandResult::Continue) => {
+                        self.stream
+                            .send_msg(RemoteMessage::CommandFinished { cmd_id: id })
+                            .await?;
+                    }
                     Ok(CommandResult::Exit(c)) => break (c, id),
                     Err(e) => {
                         self.stream

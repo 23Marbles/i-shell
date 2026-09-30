@@ -4,7 +4,7 @@ use crate::command::{Args, Command, Pipeline};
 pub enum PipelineParseErr {}
 
 impl Pipeline {
-    pub fn parse(s: String) -> Result<Self, PipelineParseErr> {
+    pub fn parse(s: &str) -> Result<Self, PipelineParseErr> {
         let iter = s.split_whitespace().collect::<Vec<_>>();
 
         let cmd_name = iter[0];

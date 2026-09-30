@@ -3,13 +3,16 @@ use shell_connection::control::{
     NegotiationError, RemoteCommandError, RemoteMessage, StreamKind,
 };
 use shell_core::{
-    command::{Command, context::CommandContext},
+    command::Command,
     streams::{
         StreamRx, StreamTx,
-        adapter::{Relay, StreamAdapter},
+        adapter::{AdapterError, RawToWireBytes, Relay, StreamAdapter, WireBytesToRaw},
     },
 };
-use tokio::net::{TcpSocket, TcpStream};
+use tokio::{
+    net::{TcpSocket, TcpStream},
+    task::JoinSet,
+};
 
 pub trait ControllerState {
     type ConnKind: ControlKind;
@@ -46,7 +49,7 @@ impl RemoteShellController<Waiting> {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum ComtrolCommandError {
+pub enum ControlCommandError {
     #[error("error creating {kind} stream: {err}")]
     CreateStreamErr {
         err: std::io::Error,
@@ -59,45 +62,91 @@ pub enum ComtrolCommandError {
     },
     #[error(transparent)]
     RemoteCommandErr(RemoteCommandError),
+    #[error("stream adapter failed: {0}")]
+    StreamAdapterErr(String),
+    #[error("unexpected response while setting up or finishing command")]
+    UnexpectedRemoteMessage,
     #[error("child exited with error code {0}")]
     RemoteExited(u32),
-    #[error(transparent)]
-    IoErr(#[from] std::io::Error),
 }
 
 impl RemoteShellController<Connected> {
     pub async fn run_cmd(
         &mut self,
         cmd: Command,
-        ctx: CommandContext,
-    ) -> Result<(), ComtrolCommandError> {
-        let stdin_listener = TcpSocket::new_v4()
-            .and_then(|sock| sock.listen(32))
-            .map_err(|e| ComtrolCommandError::CreateStreamErr {
+        stdin: Option<StreamRx>,
+        stdout: Option<StreamTx>,
+        stderr: Option<StreamTx>,
+    ) -> Result<Result<(), ControlCommandError>, std::io::Error> {
+        let stdin_listener = match TcpSocket::new_v4()
+            .and_then(|sock| {
+                sock.bind("127.0.0.1:0".parse().unwrap())?;
+                sock.listen(128)
+            })
+            .map_err(|e| ControlCommandError::CreateStreamErr {
                 kind: StreamKind::Stdin,
                 err: e,
-            })?;
-        let stdout_listener = TcpSocket::new_v4()
-            .and_then(|sock| sock.listen(32))
-            .map_err(|e| ComtrolCommandError::CreateStreamErr {
+            }) {
+            Ok(l) => l,
+            Err(e) => return Ok(Err(e)),
+        };
+        let stdout_listener = match TcpSocket::new_v4()
+            .and_then(|sock| {
+                sock.bind("127.0.0.1:0".parse().unwrap())?;
+                sock.listen(128)
+            })
+            .map_err(|e| ControlCommandError::CreateStreamErr {
                 kind: StreamKind::Stdout,
                 err: e,
-            })?;
-        let stderr_listener = TcpSocket::new_v4()
-            .and_then(|sock| sock.listen(32))
-            .map_err(|e| ComtrolCommandError::CreateStreamErr {
+            }) {
+            Ok(l) => l,
+            Err(e) => return Ok(Err(e)),
+        };
+        let stderr_listener = match TcpSocket::new_v4()
+            .and_then(|sock| {
+                sock.bind("127.0.0.1:0".parse().unwrap())?;
+                sock.listen(128)
+            })
+            .map_err(|e| ControlCommandError::CreateStreamErr {
                 kind: StreamKind::Stderr,
                 err: e,
-            })?;
+            }) {
+            Ok(l) => l,
+            Err(e) => return Ok(Err(e)),
+        };
 
         let id = CommandId::new_random();
 
         self.stream
             .send_cmd(ControlMessage::RunCommand {
                 cmd,
-                stdin: stdin_listener.local_addr()?,
-                stdout: stdout_listener.local_addr()?,
-                stderr: stderr_listener.local_addr()?,
+                stdin: match stdin_listener.local_addr() {
+                    Ok(s) => s,
+                    Err(err) => {
+                        return Ok(Err(ControlCommandError::CreateStreamErr {
+                            err,
+                            kind: StreamKind::Stdin,
+                        }));
+                    }
+                },
+                stdout: match stdout_listener.local_addr() {
+                    Ok(s) => s,
+                    Err(err) => {
+                        return Ok(Err(ControlCommandError::CreateStreamErr {
+                            err,
+                            kind: StreamKind::Stdout,
+                        }));
+                    }
+                },
+                stderr: match stderr_listener.local_addr() {
+                    Ok(s) => s,
+                    Err(err) => {
+                        return Ok(Err(ControlCommandError::CreateStreamErr {
+                            err,
+                            kind: StreamKind::Stderr,
+                        }));
+                    }
+                },
                 id,
             })
             .await?;
@@ -105,24 +154,34 @@ impl RemoteShellController<Connected> {
         let (remote_stdin_sock, remote_stdout_sock, remote_stderr_sock) =
             match self.stream.recv_response().await? {
                 RemoteMessage::CommandError { err, cmd_id } => {
-                    return Err(if cmd_id != id {
-                        ComtrolCommandError::MismatchedCommandIds {
+                    return Ok(Err(if cmd_id != id {
+                        ControlCommandError::MismatchedCommandIds {
                             this_id: id,
                             remote_id: cmd_id,
                         }
                     } else {
-                        ComtrolCommandError::RemoteCommandErr(err)
-                    });
+                        ControlCommandError::RemoteCommandErr(err)
+                    }));
                 }
                 RemoteMessage::Exit { code, cmd_id } => {
-                    return Err(if cmd_id != id {
-                        ComtrolCommandError::MismatchedCommandIds {
+                    return Ok(Err(if cmd_id != id {
+                        ControlCommandError::MismatchedCommandIds {
                             this_id: id,
                             remote_id: cmd_id,
                         }
                     } else {
-                        ComtrolCommandError::RemoteExited(code)
-                    });
+                        ControlCommandError::RemoteExited(code)
+                    }));
+                }
+                RemoteMessage::CommandFinished { cmd_id } => {
+                    return Ok(Err(if cmd_id != id {
+                        ControlCommandError::MismatchedCommandIds {
+                            this_id: id,
+                            remote_id: cmd_id,
+                        }
+                    } else {
+                        ControlCommandError::UnexpectedRemoteMessage
+                    }));
                 }
                 RemoteMessage::SetupStreams {
                     stdin,
@@ -131,10 +190,10 @@ impl RemoteShellController<Connected> {
                     cmd_id,
                 } => {
                     if cmd_id != id {
-                        return Err(ComtrolCommandError::MismatchedCommandIds {
+                        return Ok(Err(ControlCommandError::MismatchedCommandIds {
                             this_id: id,
                             remote_id: cmd_id,
-                        });
+                        }));
                     } else {
                         (stdin, stdout, stderr)
                     }
@@ -152,7 +211,15 @@ impl RemoteShellController<Connected> {
         while stderr_receiver.is_none() || stdin_sender.is_none() || stdout_receiver.is_none() {
             tokio::select! {
                 accepted = async { stdin_listener.as_ref().unwrap().accept().await }, if stdin_sender.is_none() => {
-                    let accepted = accepted?;
+                    let accepted = match accepted {
+                        Ok(a) => a,
+                        Err(err) => {
+                            return Ok(Err(ControlCommandError::CreateStreamErr {
+                                err,
+                                kind: StreamKind::Stdin,
+                            }));
+                        }
+                    };
 
                     if accepted.1 != remote_stdin_sock {
                         continue;
@@ -162,7 +229,15 @@ impl RemoteShellController<Connected> {
                     stdin_listener = None;
                 }
                 accepted = async { stdout_listener.as_ref().unwrap().accept().await }, if stdout_receiver.is_none() => {
-                    let accepted = accepted?;
+                    let accepted = match accepted {
+                        Ok(a) => a,
+                        Err(err) => {
+                            return Ok(Err(ControlCommandError::CreateStreamErr {
+                                err,
+                                kind: StreamKind::Stdout,
+                            }));
+                        }
+                    };
 
                     if accepted.1 != remote_stdout_sock {
                         continue;
@@ -172,7 +247,15 @@ impl RemoteShellController<Connected> {
                     stdout_listener = None;
                 }
                 accepted = async { stderr_listener.as_ref().unwrap().accept().await }, if stderr_receiver.is_none() => {
-                    let accepted = accepted?;
+                    let accepted = match accepted {
+                        Ok(a) => a,
+                        Err(err) => {
+                            return Ok(Err(ControlCommandError::CreateStreamErr {
+                                err,
+                                kind: StreamKind::Stderr,
+                            }));
+                        }
+                    };
 
                     if accepted.1 != remote_stderr_sock {
                         continue;
@@ -188,21 +271,97 @@ impl RemoteShellController<Connected> {
         let stdout_receiver = stdout_receiver.unwrap();
         let stderr_receiver = stderr_receiver.unwrap();
 
-        let stdin_adapter = StreamAdapter::<Relay>::spawn(
-            ctx.stdin.unwrap_or(StreamRx::from(tokio::io::stdin())),
-            stdin_sender.into(),
-        );
-        let stdout_adapter = StreamAdapter::<Relay>::spawn(
-            stdout_receiver.into(),
-            ctx.stdout.unwrap_or(StreamTx::from(tokio::io::stdout())),
-        );
-        let stderr_adapter = StreamAdapter::<Relay>::spawn(
-            stderr_receiver.into(),
-            ctx.stderr.unwrap_or(StreamTx::from(tokio::io::stderr())),
-        );
+        let mut set: JoinSet<Result<(), AdapterError>> = JoinSet::new();
 
-        todo!("Monitoring and graceful shutdown");
+        let stdin_cancel = if let Some(stdin) = stdin {
+            let mut adapter = StreamAdapter::<Relay>::spawn(stdin, stdin_sender.into());
+            let cancel = adapter.cancellation_token();
+            set.spawn(async move { adapter.result().await });
+            cancel
+        } else {
+            let mut adapter = StreamAdapter::<RawToWireBytes>::spawn(
+                StreamRx::from(tokio::io::stdin()),
+                stdin_sender.into(),
+            );
+            let cancel = adapter.cancellation_token();
+            set.spawn(async move { adapter.result().await });
+            cancel
+        };
 
-        Ok(())
+        if let Some(stdout) = stdout {
+            let mut adapter = StreamAdapter::<Relay>::spawn(stdout_receiver.into(), stdout);
+            set.spawn(async move { adapter.result().await });
+        } else {
+            let mut adapter = StreamAdapter::<WireBytesToRaw>::spawn(
+                stdout_receiver.into(),
+                StreamTx::from(tokio::io::stdout()),
+            );
+            set.spawn(async move { adapter.result().await });
+        }
+
+        if let Some(stderr) = stderr {
+            let mut adapter = StreamAdapter::<Relay>::spawn(stderr_receiver.into(), stderr);
+            set.spawn(async move { adapter.result().await });
+        } else {
+            let mut adapter = StreamAdapter::<WireBytesToRaw>::spawn(
+                stderr_receiver.into(),
+                StreamTx::from(tokio::io::stderr()),
+            );
+            set.spawn(async move { adapter.result().await });
+        }
+
+        let response = self.stream.recv_response().await;
+        stdin_cancel.cancel();
+
+        let mut adapter_error = None;
+        while let Some(result) = set.join_next().await {
+            match result {
+                Ok(Ok(())) => (),
+                Ok(Err(err)) => {
+                    adapter_error.get_or_insert_with(|| err.to_string());
+                }
+                Err(err) => {
+                    adapter_error.get_or_insert_with(|| err.to_string());
+                }
+            };
+        }
+
+        let response = response?;
+
+        match response {
+            RemoteMessage::CommandFinished { cmd_id } => {
+                if cmd_id != id {
+                    return Ok(Err(ControlCommandError::MismatchedCommandIds {
+                        this_id: id,
+                        remote_id: cmd_id,
+                    }));
+                }
+
+                if let Some(err) = adapter_error {
+                    Ok(Err(ControlCommandError::StreamAdapterErr(err)))
+                } else {
+                    Ok(Ok(()))
+                }
+            }
+            RemoteMessage::CommandError { err, cmd_id } => Ok(Err(if cmd_id != id {
+                ControlCommandError::MismatchedCommandIds {
+                    this_id: id,
+                    remote_id: cmd_id,
+                }
+            } else {
+                ControlCommandError::RemoteCommandErr(err)
+            })),
+            RemoteMessage::Exit { code, cmd_id } => Ok(Err(if cmd_id != id {
+                ControlCommandError::MismatchedCommandIds {
+                    this_id: id,
+                    remote_id: cmd_id,
+                }
+            } else {
+                ControlCommandError::RemoteExited(code)
+            })),
+            RemoteMessage::SetupStreams { .. } => {
+                Ok(Err(ControlCommandError::UnexpectedRemoteMessage))
+            }
+        }
     }
 }
