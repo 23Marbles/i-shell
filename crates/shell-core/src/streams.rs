@@ -121,7 +121,7 @@ impl StreamRx {
         Ok(val)
     }
 
-    pub async fn recv_raw(&mut self) -> Result<bytes::Bytes, StreamReceiveError> {
+    pub async fn recv_raw(&mut self) -> Result<(Header, bytes::Bytes), StreamReceiveError> {
         let mut header_buf = [0u8; 8];
         self.inner.recv_exact(&mut header_buf).await?;
         let header = Header::decode(header_buf)?;
@@ -130,6 +130,6 @@ impl StreamRx {
 
         self.inner.recv_exact(&mut buf).await?;
 
-        Ok(buf.into())
+        Ok((header, buf.into()))
     }
 }

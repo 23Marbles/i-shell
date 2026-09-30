@@ -1,4 +1,4 @@
-use std::{path::PathBuf, process::{ExitStatus}};
+use std::{path::PathBuf, process::ExitStatus};
 
 use crate::{
     command::{builtin::BuiltinFunc, context::CommandContext, program::Program},

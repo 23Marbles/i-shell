@@ -1,6 +1,4 @@
-use std::{
-    collections::HashMap, path::PathBuf, pin::Pin,
-};
+use std::{collections::HashMap, path::PathBuf, pin::Pin};
 
 use crate::command::{
     Args, CommandError, CommandErrorKind, CommandResult, context::CommandContext,

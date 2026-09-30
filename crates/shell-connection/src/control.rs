@@ -11,8 +11,14 @@ pub trait ControlKind {}
 pub struct Controller;
 impl ControlKind for Controller {}
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CommandId(u32);
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
+pub struct CommandId(uuid::Uuid);
+
+impl CommandId {
+    pub fn new_random() -> Self {
+        Self(uuid::Uuid::new_v4())
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ControlMessage {
@@ -53,10 +59,7 @@ pub enum RemoteCommandError {
     CommandError(#[from] WireCommandError),
 
     #[error("Failed creating {kind} stream: {err}")]
-    CreateStreamErr {
-        kind: StreamKind,
-        err: String,
-    },
+    CreateStreamErr { kind: StreamKind, err: String },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -68,6 +71,13 @@ pub enum RemoteMessage {
 
     Exit {
         code: u32,
+        cmd_id: CommandId,
+    },
+
+    SetupStreams {
+        stdin: SocketAddr,
+        stdout: SocketAddr,
+        stderr: SocketAddr,
         cmd_id: CommandId,
     },
 }

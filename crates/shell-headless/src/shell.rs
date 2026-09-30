@@ -2,8 +2,8 @@ use std::{net::SocketAddr, process::ExitCode};
 
 use async_result_ext::AsyncResultExt;
 use shell_connection::control::{
-    ControlConnection, ControlKind, ControlMessage, Negotiating, NegotiationError, Remote,
-    RemoteCommandError, RemoteMessage, StreamKind,
+    CommandId, ControlConnection, ControlKind, ControlMessage, Negotiating, NegotiationError,
+    Remote, RemoteCommandError, RemoteMessage, StreamKind,
 };
 use shell_core::{
     command::{Command, CommandError, CommandResult, context::CommandContext},
@@ -84,7 +84,7 @@ impl HeadlessShell<Connected> {
                     stdin,
                     stdout,
                     stderr,
-                } => match self.run_cmd(cmd, stdin, stdout, stderr).await {
+                } => match self.run_cmd(cmd, stdin, stdout, stderr, id).await {
                     Ok(CommandResult::Continue) => (),
                     Ok(CommandResult::Exit(c)) => break (c, id),
                     Err(e) => {
@@ -110,11 +110,12 @@ impl HeadlessShell<Connected> {
     }
 
     pub async fn run_cmd(
-        &self,
+        &mut self,
         cmd: Command,
         stdin: SocketAddr,
         stdout: SocketAddr,
         stderr: SocketAddr,
+        cmd_id: CommandId,
     ) -> Result<CommandResult, Error> {
         let stdin = match if stdin.is_ipv4() {
             TcpSocket::new_v4()
@@ -166,6 +167,15 @@ impl HeadlessShell<Connected> {
                 });
             }
         };
+
+        self.stream
+            .send_msg(RemoteMessage::SetupStreams {
+                stdin: stdin.local_addr()?,
+                stdout: stdout.local_addr()?,
+                stderr: stderr.local_addr()?,
+                cmd_id,
+            })
+            .await?;
 
         let cmd = Command::from(cmd).resolve(&self.shell_handle).await?;
 

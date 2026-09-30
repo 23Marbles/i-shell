@@ -10,3 +10,4 @@ serde = { version = "1.0.229", features = ["serde_derive"] }
 shell-core = { path = "../shell-core", features = ["serde"] }
 thiserror = "2.0.21"
 tokio = { version = "1.53.1", features = ["full"] }
+uuid = { version = "1.26.1", features = ["serde", "v4", "v6", "v7"] }

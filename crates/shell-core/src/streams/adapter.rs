@@ -31,6 +31,9 @@ pub struct TypeFilter<T> {
 }
 impl<T> AdapterKind for TypeFilter<T> {}
 
+pub struct Relay;
+impl AdapterKind for Relay {}
+
 pub struct StreamAdapter<A: AdapterKind> {
     cancel_token: CancellationToken,
     task_handle: JoinHandle<Result<(), StreamError>>,
@@ -56,7 +59,7 @@ impl StreamAdapter<Blank> {
             let mut sender = sender;
 
             loop {
-                let bytes = select! {
+                let (_, bytes) = select! {
                     _ = cancel.cancelled() => {
                         break;
                     }
@@ -110,7 +113,6 @@ impl<T: AdapterKind> StreamAdapter<T> {
 }
 
 impl<T: WireDecode + WireEncode + Send> StreamAdapter<TypeFilter<T>> {
-    /// Will funnel data straight from the reciever into the sender removing type and length data
     pub fn spawn(reciever: StreamRx, sender: StreamTx) -> Self {
         let cancel = CancellationToken::new();
         let cancel_cloned = cancel.clone();
@@ -142,6 +144,66 @@ impl<T: WireDecode + WireEncode + Send> StreamAdapter<TypeFilter<T>> {
                     }
 
                     res = sender.send(t) => {
+                        match res {
+                            Ok(()) => (),
+                            Err(e) => return Err(e.into()),
+                        }
+                    }
+                };
+            }
+
+            Ok(())
+        });
+
+        Self {
+            cancel_token: cancel,
+            task_handle: handle,
+            _kind: PhantomData,
+        }
+    }
+}
+
+impl StreamAdapter<Relay> {
+    pub fn spawn(reciever: StreamRx, sender: StreamTx) -> Self {
+        let cancel = CancellationToken::new();
+        let cancel_cloned = cancel.clone();
+
+        let handle = tokio::task::spawn(async move {
+            let cancel = cancel_cloned;
+
+            let mut reciever = reciever;
+            let mut sender = sender;
+
+            loop {
+                let (header, bytes) = select! {
+                    _ = cancel.cancelled() => {
+                        break;
+                    }
+
+                    res = reciever.recv_raw() => {
+                        res
+                    }
+                }?;
+
+                select! {
+                    _ = cancel.cancelled() => {
+                        break;
+                    }
+
+                    res = sender.send_raw(header.encode_bytes()) => {
+                        match res {
+                            Ok(()) => (),
+                            Err(e) => return Err(e.into()),
+                        }
+                    }
+                };
+
+                select! {
+                    _ = cancel.cancelled() => {
+                        break;
+                    }
+
+                    res = sender.send_raw(bytes) => {
                         match res {
                             Ok(()) => (),
                             Err(e) => return Err(e.into()),
