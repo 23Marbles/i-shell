@@ -1,3 +1,5 @@
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+
 use shell_connection::control::{
     CommandId, ControlConnection, ControlKind, ControlMessage, Controller, Negotiating,
     NegotiationError, RemoteCommandError, RemoteMessage, StreamKind,
@@ -10,7 +12,7 @@ use shell_core::{
     },
 };
 use tokio::{
-    net::{TcpSocket, TcpStream},
+    net::{TcpListener, TcpSocket, TcpStream},
     task::JoinSet,
 };
 
@@ -29,12 +31,14 @@ impl ControllerState for Waiting {
 
 pub struct RemoteShellController<S: ControllerState> {
     stream: ControlConnection<S::ConnKind>,
+    advertise_ip: IpAddr,
 }
 
 impl RemoteShellController<Waiting> {
-    pub async fn new(stream: TcpStream) -> Self {
+    pub async fn new(stream: TcpStream, advertise_ip: IpAddr) -> Self {
         Self {
             stream: ControlConnection::from(stream),
+            advertise_ip,
         }
     }
 
@@ -44,6 +48,7 @@ impl RemoteShellController<Waiting> {
             .await
             .map(|_| RemoteShellController {
                 stream: ControlConnection::from(self.stream.stream),
+                advertise_ip: self.advertise_ip,
             })
     }
 }
@@ -70,6 +75,29 @@ pub enum ControlCommandError {
     RemoteExited(u32),
 }
 
+fn create_stream_listener(
+    advertise_ip: IpAddr,
+    kind: StreamKind,
+) -> Result<TcpListener, ControlCommandError> {
+    let bind_addr = match advertise_ip {
+        IpAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
+        IpAddr::V6(_) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
+    };
+
+    let listener = (|| {
+        let socket = if advertise_ip.is_ipv4() {
+            TcpSocket::new_v4()?
+        } else {
+            TcpSocket::new_v6()?
+        };
+        socket.bind(bind_addr)?;
+        socket.listen(128)
+    })()
+    .map_err(|err| ControlCommandError::CreateStreamErr { err, kind })?;
+
+    Ok(listener)
+}
+
 impl RemoteShellController<Connected> {
     pub async fn run_cmd(
         &mut self,
@@ -78,39 +106,15 @@ impl RemoteShellController<Connected> {
         stdout: Option<StreamTx>,
         stderr: Option<StreamTx>,
     ) -> Result<Result<(), ControlCommandError>, std::io::Error> {
-        let stdin_listener = match TcpSocket::new_v4()
-            .and_then(|sock| {
-                sock.bind("127.0.0.1:0".parse().unwrap())?;
-                sock.listen(128)
-            })
-            .map_err(|e| ControlCommandError::CreateStreamErr {
-                kind: StreamKind::Stdin,
-                err: e,
-            }) {
+        let stdin_listener = match create_stream_listener(self.advertise_ip, StreamKind::Stdin) {
             Ok(l) => l,
             Err(e) => return Ok(Err(e)),
         };
-        let stdout_listener = match TcpSocket::new_v4()
-            .and_then(|sock| {
-                sock.bind("127.0.0.1:0".parse().unwrap())?;
-                sock.listen(128)
-            })
-            .map_err(|e| ControlCommandError::CreateStreamErr {
-                kind: StreamKind::Stdout,
-                err: e,
-            }) {
+        let stdout_listener = match create_stream_listener(self.advertise_ip, StreamKind::Stdout) {
             Ok(l) => l,
             Err(e) => return Ok(Err(e)),
         };
-        let stderr_listener = match TcpSocket::new_v4()
-            .and_then(|sock| {
-                sock.bind("127.0.0.1:0".parse().unwrap())?;
-                sock.listen(128)
-            })
-            .map_err(|e| ControlCommandError::CreateStreamErr {
-                kind: StreamKind::Stderr,
-                err: e,
-            }) {
+        let stderr_listener = match create_stream_listener(self.advertise_ip, StreamKind::Stderr) {
             Ok(l) => l,
             Err(e) => return Ok(Err(e)),
         };
@@ -121,7 +125,7 @@ impl RemoteShellController<Connected> {
             .send_cmd(ControlMessage::RunCommand {
                 cmd,
                 stdin: match stdin_listener.local_addr() {
-                    Ok(s) => s,
+                    Ok(s) => SocketAddr::new(self.advertise_ip, s.port()),
                     Err(err) => {
                         return Ok(Err(ControlCommandError::CreateStreamErr {
                             err,
@@ -130,7 +134,7 @@ impl RemoteShellController<Connected> {
                     }
                 },
                 stdout: match stdout_listener.local_addr() {
-                    Ok(s) => s,
+                    Ok(s) => SocketAddr::new(self.advertise_ip, s.port()),
                     Err(err) => {
                         return Ok(Err(ControlCommandError::CreateStreamErr {
                             err,
@@ -139,7 +143,7 @@ impl RemoteShellController<Connected> {
                     }
                 },
                 stderr: match stderr_listener.local_addr() {
-                    Ok(s) => s,
+                    Ok(s) => SocketAddr::new(self.advertise_ip, s.port()),
                     Err(err) => {
                         return Ok(Err(ControlCommandError::CreateStreamErr {
                             err,
