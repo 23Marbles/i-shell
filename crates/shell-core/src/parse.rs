@@ -7,8 +7,8 @@ pub enum PipelineParseErr {}
 
 #[derive(Default)]
 pub struct ParseState {
-    single: bool,
-    double: bool,
+    pub single: bool,
+    pub double: bool,
 }
 
 impl Pipeline {
