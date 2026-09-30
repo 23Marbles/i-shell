@@ -96,8 +96,8 @@ macro_rules! builtin_list {
 }
 
 builtin_list!(
-    EXIT = "exit" | mut _ctx, args | { match args.values.get(0) {
-        Some(code_s) => match u8::from_str_radix(code_s, 10) {
+    EXIT = "exit" | mut _ctx, args | { match args.values.first() {
+        Some(code_s) => match code_s.parse::<u8>() {
             Ok(code) => Ok(CommandResult::Exit(code)),
             Err(e) => err!(e.to_string() => args()),
         },
@@ -142,36 +142,21 @@ builtin_list!(
         let join_path = PathBuf::from(new_path_str);
 
         let new_path = if *new_path_str == "~" {
-            btry!(std::env::home_dir()
-                .ok_or(CommandErrorKind::Other("No HOME environemt variable set".to_string())))
-        } else if join_path.is_absolute() {
-            join_path
-        } else {
-            let components = join_path.components();
+            let path = btry!(std::env::home_dir()
+                .ok_or(CommandErrorKind::Other("No HOME environment variable set".to_string())));
 
-            let mut pathbuf = ctx.current_dir().await;
-
-            for component in components {
-                match component {
-                    std::path::Component::CurDir => (),
-                    std::path::Component::ParentDir => {
-                        if !pathbuf.pop() {
-                            err!("No such file or directory".to_string() => other());
-                        }
-                    }
-                    std::path::Component::Normal(os_str) => pathbuf.push(os_str),
-
-                    std::path::Component::Prefix(_) => todo!(),
-                    std::path::Component::RootDir => todo!(),
-                }
+            if !path.exists() {
+                err!(std::io::Error::new(std::io::ErrorKind::NotADirectory, format!("{} doesn't exist", path.display())));
+            } else {
+                path
             }
+        } else {
+            let curr_path = ctx.current_dir().await;
 
-            pathbuf
+            let joined = btry!(curr_path.join(join_path).canonicalize());
+
+            joined
         };
-
-        if !new_path.exists() {
-            err!("No such file or directory".to_string() => other());
-        }
 
         let _ = ctx.shell_mut(|mut shell| shell.cwd = new_path).await;
 

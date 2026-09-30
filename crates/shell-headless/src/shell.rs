@@ -181,7 +181,7 @@ impl HeadlessShell<Connected> {
             })
             .await?;
 
-        let cmd = Command::from(cmd).resolve(&self.shell_handle).await?;
+        let cmd = cmd.resolve(&self.shell_handle).await?;
 
         let ctx = CommandContext::new(&self.shell_handle)
             .with_stdin(stdin.into())
