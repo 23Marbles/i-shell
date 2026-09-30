@@ -45,8 +45,8 @@ async fn main() -> Result<ExitCode, ReadlineError> {
             Err(e) => return Err(e),
         };
 
-        let cmd = match Pipeline::parse(&line).unwrap() {
-            Some(p) => p.cmd,
+        let cmd = match Pipeline::parse(&line) {
+            Some(res) => res.unwrap().cmd,
             None => continue,
         };
 

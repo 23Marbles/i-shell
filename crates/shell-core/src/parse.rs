@@ -1,26 +1,45 @@
+use std::collections::VecDeque;
+
 use crate::command::{Args, Command, Pipeline};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PipelineParseErr {}
 
+#[derive(Default)]
+pub struct ParseState {
+    single: bool,
+    double: bool,
+}
+
 impl Pipeline {
-    pub fn parse(s: &str) -> Result<Option<Self>, PipelineParseErr> {
-        let iter = s.split_whitespace().collect::<Vec<_>>();
+    pub fn parse(s: &str) -> Option<Result<Self, PipelineParseErr>> {
+        let mut state = ParseState::default();
 
-        let cmd_name = iter[0];
+        let mut args = VecDeque::new();
 
-        let args = &iter[1..];
+        let mut current_buf = String::new();
 
-        Ok(Some(Self {
+        for ch in s.chars() {
+            match ch {
+                '"' if state.double || !state.single => state.double ^= true,
+                '\'' if state.single || !state.double => state.single ^= true,
+                ' ' if !state.double && !state.single => {
+                    args.push_back(current_buf);
+                    current_buf = String::new();
+                }
+                ch => current_buf.push(ch),
+            }
+        }
+
+        args.push_back(current_buf);
+
+        Some(Ok(Self {
             cmd: Command {
-                name: cmd_name.to_string(),
+                name: args.pop_front()?,
                 args: Args {
-                    values: args.iter().map(|s| s.to_string()).collect(),
+                    values: args.into_iter().collect(),
                 },
             },
         }))
     }
 }
-
-#[derive(Debug, thiserror::Error)]
-pub enum ParseError {}

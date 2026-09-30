@@ -71,8 +71,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             buf.trim()
         };
 
-        let cmd = match Pipeline::parse(line).unwrap() {
-            Some(p) => p.cmd,
+        let cmd = match Pipeline::parse(line) {
+            Some(res) => res.unwrap().cmd,
             None => continue,
         };
 
