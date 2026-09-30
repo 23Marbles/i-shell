@@ -71,7 +71,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             buf.trim()
         };
 
-        let cmd = Pipeline::parse(line).unwrap().cmd;
+        let cmd = match Pipeline::parse(line).unwrap() {
+            Some(p) => p.cmd,
+            None => continue,
+        };
 
         match controller
             .run_cmd(cmd, Some(StreamRx::from(tokio::io::empty())), None, None)

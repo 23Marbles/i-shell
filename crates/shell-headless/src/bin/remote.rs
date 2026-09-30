@@ -49,10 +49,7 @@ async fn main() -> Result<ExitCode, Box<dyn Error>> {
     Ok(code)
 }
 
-async fn connect_when_available(
-    socket: TcpSocket,
-    address: SocketAddr,
-) -> io::Result<TcpStream> {
+async fn connect_when_available(socket: TcpSocket, address: SocketAddr) -> io::Result<TcpStream> {
     let local_address = socket.local_addr()?;
     let mut socket = Some(socket);
     let mut reported_wait = false;
@@ -104,7 +101,9 @@ mod tests {
         });
 
         let client_task = tokio::spawn(async move {
-            connect_when_available(client_socket, address).await.unwrap()
+            connect_when_available(client_socket, address)
+                .await
+                .unwrap()
         });
 
         let listener = listener_task.await.unwrap();
