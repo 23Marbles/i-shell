@@ -4,15 +4,12 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
-use shell_connection::tls::TlsSettings;
 use shell_core::{command::Pipeline, streams::StreamRx};
 use shell_headless::controller::RemoteShellController;
 use tokio::net::TcpSocket;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let tls = TlsSettings::from_env()?;
-
     print!("IP address reachable by the remote (LAN/VPN): ");
     stdout().flush()?;
 
@@ -59,8 +56,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Accepted connection");
 
-    let tcp_stream = tls.accept(tcp_stream).await?;
-    let controller = RemoteShellController::new(tcp_stream, advertise_ip, tls).await;
+    let controller = RemoteShellController::new(tcp_stream, advertise_ip).await;
 
     let mut controller = controller.wait().await?;
 

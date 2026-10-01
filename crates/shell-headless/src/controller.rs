@@ -4,7 +4,6 @@ use shell_connection::control::{
     CommandId, ControlConnection, ControlKind, ControlMessage, Controller, Negotiating,
     NegotiationError, RemoteCommandError, RemoteMessage, StreamKind,
 };
-use shell_connection::tls::TlsSettings;
 use shell_core::{
     command::Command,
     streams::{
@@ -16,7 +15,6 @@ use tokio::{
     net::{TcpListener, TcpSocket, TcpStream},
     task::JoinSet,
 };
-use tokio_rustls::TlsStream;
 
 pub trait ControllerState {
     type ConnKind: ControlKind;
@@ -34,15 +32,13 @@ impl ControllerState for Waiting {
 pub struct RemoteShellController<S: ControllerState> {
     stream: ControlConnection<S::ConnKind>,
     advertise_ip: IpAddr,
-    tls: TlsSettings,
 }
 
 impl RemoteShellController<Waiting> {
-    pub async fn new(stream: TlsStream<TcpStream>, advertise_ip: IpAddr, tls: TlsSettings) -> Self {
+    pub async fn new(stream: TcpStream, advertise_ip: IpAddr) -> Self {
         Self {
             stream: ControlConnection::from(stream),
             advertise_ip,
-            tls,
         }
     }
 
@@ -53,7 +49,6 @@ impl RemoteShellController<Waiting> {
             .map(|_| RemoteShellController {
                 stream: ControlConnection::from(self.stream.stream),
                 advertise_ip: self.advertise_ip,
-                tls: self.tls,
             })
     }
 }
@@ -234,17 +229,7 @@ impl RemoteShellController<Connected> {
                         continue;
                     }
 
-                    let stream = match self.tls.accept(accepted.0).await {
-                        Ok(stream) => stream,
-                        Err(err) => {
-                            return Ok(Err(ControlCommandError::CreateStreamErr {
-                                err,
-                                kind: StreamKind::Stdin,
-                            }));
-                        }
-                    };
-
-                    stdin_sender = Some(stream);
+                    stdin_sender = Some(accepted.0);
                     stdin_listener = None;
                 }
                 accepted = async { stdout_listener.as_ref().unwrap().accept().await }, if stdout_receiver.is_none() => {
@@ -262,17 +247,7 @@ impl RemoteShellController<Connected> {
                         continue;
                     }
 
-                    let stream = match self.tls.accept(accepted.0).await {
-                        Ok(stream) => stream,
-                        Err(err) => {
-                            return Ok(Err(ControlCommandError::CreateStreamErr {
-                                err,
-                                kind: StreamKind::Stdout,
-                            }));
-                        }
-                    };
-
-                    stdout_receiver = Some(stream);
+                    stdout_receiver = Some(accepted.0);
                     stdout_listener = None;
                 }
                 accepted = async { stderr_listener.as_ref().unwrap().accept().await }, if stderr_receiver.is_none() => {
@@ -290,17 +265,7 @@ impl RemoteShellController<Connected> {
                         continue;
                     }
 
-                    let stream = match self.tls.accept(accepted.0).await {
-                        Ok(stream) => stream,
-                        Err(err) => {
-                            return Ok(Err(ControlCommandError::CreateStreamErr {
-                                err,
-                                kind: StreamKind::Stderr,
-                            }));
-                        }
-                    };
-
-                    stderr_receiver = Some(stream);
+                    stderr_receiver = Some(accepted.0);
                     stderr_listener = None;
                 }
             }

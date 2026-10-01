@@ -7,5 +7,3 @@ edition = "2024"
 rustyline = "18.0.1"
 tokio = { version = "1.53.1", features = ["full"] }
 shell-core = { path = "../shell-core" }
-shell-headless = { path = "../shell-headless" }
-thiserror = "2.0.21"
