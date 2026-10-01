@@ -3,7 +3,7 @@ sequenceDiagram
   participant RD as Remote Daemon
   participant D as Daemon
   participant S as Shell
-
+  
   S->>D: Connection request to the IP of the remote machine
   D->>RD: Send a connection request to the listening daemon on the remote
 
@@ -28,11 +28,11 @@ peer-reachable address to advertise; `0.0.0.0` and `::` are bind addresses, not
 addresses to enter on the other machine.
 
 1. Start the controller and enter an IP address the remote can route to, such as
-   the controller's LAN or VPN address. The controller prints the control
-   address and starts listening before asking for the remote's peer address.
+  the controller's LAN or VPN address. The controller prints the control
+  address and starts listening before asking for the remote's peer address.
 2. Start the remote and enter the controller's printed `IP:port`.
 3. After connecting, the remote prints its actual source `IP:port`. Enter that
-   full address at the controller so it can verify the peer.
+  full address at the controller so it can verify the peer.
 4. Run commands from the controller prompt.
 
 ## Mutual TLS
@@ -50,13 +50,13 @@ machine. Keep `ca-key.pem` private and do not copy it to either machine:
 
 ```sh
 openssl req -x509 -newkey rsa:3072 -nodes -keyout ca-key.pem -out ca.pem -days 3650 -subj "/CN=i-shell CA"
-openssl req -newkey rsa:3072 -nodes -keyout controller-key.pem -out controller.csr -subj "/CN=i-shell controller" -addext "subjectAltName=IP:127.0.0.1" -addext "extendedKeyUsage=clientAuth,serverAuth"
+openssl req -newkey rsa:3072 -nodes -keyout controller-key.pem -out controller.csr -subj "/CN=i-shell controller" -addext "subjectAltName=IP:192.168.1.10" -addext "extendedKeyUsage=clientAuth,serverAuth"
 openssl x509 -req -in controller.csr -CA ca.pem -CAkey ca-key.pem -CAcreateserial -out controller.pem -days 825 -copy_extensions copy
 openssl req -newkey rsa:3072 -nodes -keyout remote-key.pem -out remote.csr -subj "/CN=i-shell remote" -addext "extendedKeyUsage=clientAuth,serverAuth"
 openssl x509 -req -in remote.csr -CA ca.pem -CAkey ca-key.pem -CAcreateserial -out remote.pem -days 825 -copy_extensions copy
 ```
 
-Replace `127.0.0.1` with the IP entered as the controller's advertised
+Replace `192.168.1.10` with the IP entered as the controller's advertised
 address. The `ca.pem` file and each machine's own leaf certificate/key must be
 available on that machine. Never copy a private key to the other peer.
 
