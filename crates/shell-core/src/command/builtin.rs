@@ -25,17 +25,18 @@ pub enum BuiltinRegisterError {
 
 impl Builtins {
     pub fn register(&mut self, builtin: Builtin) -> Result<(), BuiltinRegisterError> {
-        if self
-            .0
-            .insert(builtin.name.to_string(), builtin.function)
-            .is_some()
-        {
-            return Err(BuiltinRegisterError::AlreadyRegistered(
+        if self.0.contains_key(builtin.name) {
+            Err(BuiltinRegisterError::AlreadyRegistered(
                 builtin.name.to_string(),
-            ));
+            ))
+        } else {
+            self.0.insert(builtin.name.to_string(), builtin.function);
+            Ok(())
         }
+    }
 
-        Ok(())
+    pub fn force_register(&mut self, builtin: Builtin) {
+        self.0.insert(builtin.name.to_string(), builtin.function);
     }
 
     pub fn from_builtins(builtins: &[Builtin]) -> Result<Self, BuiltinRegisterError> {
