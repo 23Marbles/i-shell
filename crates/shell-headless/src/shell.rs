@@ -1,15 +1,43 @@
 use std::{net::SocketAddr, process::ExitCode};
 
-use async_result_ext::AsyncResultExt;
 use shell_connection::control::{
     CommandId, ControlConnection, ControlKind, ControlMessage, Negotiating, NegotiationError,
     Remote, RemoteCommandError, RemoteMessage, StreamKind,
 };
+use shell_connection::tls::TlsSettings;
 use shell_core::{
     command::{Command, CommandError, CommandResult, context::CommandContext},
     shell::{Shell, ShellHandle},
 };
 use tokio::net::{TcpSocket, TcpStream};
+use tokio_rustls::TlsStream;
+
+async fn connect_tls_stream(
+    tls: &TlsSettings,
+    address: SocketAddr,
+    kind: StreamKind,
+) -> Result<(TlsStream<TcpStream>, SocketAddr), Error> {
+    let socket = match if address.is_ipv4() {
+        TcpSocket::new_v4()
+    } else {
+        TcpSocket::new_v6()
+    } {
+        Ok(socket) => socket,
+        Err(err) => return Err(Error::CreateStreamErr { kind, err }),
+    };
+
+    let stream = match socket.connect(address).await {
+        Ok(stream) => stream,
+        Err(err) => return Err(Error::CreateStreamErr { kind, err }),
+    };
+    let local_addr = stream.local_addr()?;
+    let stream = match tls.connect(stream, address.ip()).await {
+        Ok(stream) => stream,
+        Err(err) => return Err(Error::CreateStreamErr { kind, err }),
+    };
+
+    Ok((stream, local_addr))
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -54,13 +82,15 @@ impl HeadlessState for Waiting {
 pub struct HeadlessShell<S: HeadlessState> {
     stream: ControlConnection<S::ConnKind>,
     shell_handle: ShellHandle,
+    tls: TlsSettings,
 }
 
 impl HeadlessShell<Waiting> {
-    pub async fn new(stream: TcpStream) -> Self {
+    pub async fn new(stream: TlsStream<TcpStream>, tls: TlsSettings) -> Self {
         Self {
             stream: ControlConnection::from(stream),
             shell_handle: Shell::default().into_handle(),
+            tls,
         }
     }
 
@@ -68,6 +98,7 @@ impl HeadlessShell<Waiting> {
         self.stream.attempt_conn().await.map(|_| HeadlessShell {
             stream: ControlConnection::from(self.stream.stream),
             shell_handle: self.shell_handle,
+            tls: self.tls,
         })
     }
 }
@@ -121,62 +152,18 @@ impl HeadlessShell<Connected> {
         stderr: SocketAddr,
         cmd_id: CommandId,
     ) -> Result<CommandResult, Error> {
-        let stdin = match if stdin.is_ipv4() {
-            TcpSocket::new_v4()
-        } else {
-            TcpSocket::new_v6()
-        }
-        .async_and_then(async |sock| sock.connect(stdin).await)
-        .await
-        {
-            Ok(stream) => stream,
-            Err(err) => {
-                return Err(Error::CreateStreamErr {
-                    kind: StreamKind::Stdin,
-                    err,
-                });
-            }
-        };
-
-        let stdout = match if stdout.is_ipv4() {
-            TcpSocket::new_v4()
-        } else {
-            TcpSocket::new_v6()
-        }
-        .async_and_then(async |sock| sock.connect(stdout).await)
-        .await
-        {
-            Ok(stream) => stream,
-            Err(err) => {
-                return Err(Error::CreateStreamErr {
-                    kind: StreamKind::Stdout,
-                    err,
-                });
-            }
-        };
-
-        let stderr = match if stderr.is_ipv4() {
-            TcpSocket::new_v4()
-        } else {
-            TcpSocket::new_v6()
-        }
-        .async_and_then(async |sock| sock.connect(stderr).await)
-        .await
-        {
-            Ok(stream) => stream,
-            Err(err) => {
-                return Err(Error::CreateStreamErr {
-                    kind: StreamKind::Stderr,
-                    err,
-                });
-            }
-        };
+        let (stdin, stdin_local_addr) =
+            connect_tls_stream(&self.tls, stdin, StreamKind::Stdin).await?;
+        let (stdout, stdout_local_addr) =
+            connect_tls_stream(&self.tls, stdout, StreamKind::Stdout).await?;
+        let (stderr, stderr_local_addr) =
+            connect_tls_stream(&self.tls, stderr, StreamKind::Stderr).await?;
 
         self.stream
             .send_msg(RemoteMessage::SetupStreams {
-                stdin: stdin.local_addr()?,
-                stdout: stdout.local_addr()?,
-                stderr: stderr.local_addr()?,
+                stdin: stdin_local_addr,
+                stdout: stdout_local_addr,
+                stderr: stderr_local_addr,
                 cmd_id,
             })
             .await?;

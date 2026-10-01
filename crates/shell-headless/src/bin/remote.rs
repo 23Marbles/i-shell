@@ -7,11 +7,14 @@ use std::{
     time::Duration,
 };
 
+use shell_connection::tls::TlsSettings;
 use shell_headless::shell::HeadlessShell;
 use tokio::net::{TcpSocket, TcpStream};
 
 #[tokio::main]
 async fn main() -> Result<ExitCode, Box<dyn Error>> {
+    let tls = TlsSettings::from_env()?;
+
     print!("Controller address: ");
     stdout().flush()?;
 
@@ -40,7 +43,8 @@ async fn main() -> Result<ExitCode, Box<dyn Error>> {
         tcp_stream.local_addr()?
     );
 
-    let shell = HeadlessShell::new(tcp_stream).await;
+    let tcp_stream = tls.connect(tcp_stream, socket_addr.ip()).await?;
+    let shell = HeadlessShell::new(tcp_stream, tls).await;
 
     let shell = shell.wait().await?;
 

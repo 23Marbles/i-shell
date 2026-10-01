@@ -8,4 +8,4 @@ shell-core = { path = "../shell-core" }
 shell-connection = { path = "../shell-connection" }
 tokio = { version = "1.53.1", features = ["full"] }
 thiserror = "2.0.21"
-async-result-ext = "0.1.1"
+tokio-rustls = "0.26"

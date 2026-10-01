@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use shell_core::command::{Command, wire::WireCommandError};
 use std::{fmt::Display, io, marker::PhantomData, net::SocketAddr};
 use tokio::net::TcpStream;
+use tokio_rustls::TlsStream;
 
 use crate::{read_msg, write_msg};
 
@@ -87,12 +88,12 @@ pub enum RemoteMessage {
 }
 
 pub struct ControlConnection<K: ControlKind> {
-    pub stream: TcpStream,
+    pub stream: TlsStream<TcpStream>,
     _kind: PhantomData<K>,
 }
 
-impl<K: ControlKind> From<TcpStream> for ControlConnection<K> {
-    fn from(value: TcpStream) -> Self {
+impl<K: ControlKind> From<TlsStream<TcpStream>> for ControlConnection<K> {
+    fn from(value: TlsStream<TcpStream>) -> Self {
         Self {
             stream: value,
             _kind: PhantomData,
