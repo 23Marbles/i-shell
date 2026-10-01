@@ -7,7 +7,7 @@ use std::{
 use pathsearch::find_executable_in_path;
 use tokio::sync::RwLock;
 
-use crate::command::builtin::{BUILTINS, BuiltinFunc, Builtins};
+use crate::command::builtin::{BUILTINS, Builtin, BuiltinFunc, BuiltinRegisterError, Builtins};
 
 #[derive(Debug, Clone)]
 pub struct ShellHandle {
@@ -49,12 +49,17 @@ impl Default for Shell {
             } else {
                 panic!()
             }),
-            builtins: Builtins::from_builtins(BUILTINS),
+            builtins: Builtins::from_builtins(BUILTINS).unwrap(),
         }
     }
 }
 
 impl Shell {
+    #[inline]
+    pub fn add_builtin(&mut self, builtin: Builtin) -> Result<(), BuiltinRegisterError> {
+        self.builtins.register(builtin)
+    }
+
     #[inline]
     pub fn resolve_builtin(&self, builtin_name: &str) -> Option<BuiltinFunc> {
         self.builtins.get(builtin_name)

@@ -15,19 +15,39 @@ pub struct Builtin {
 
 #[derive(Debug)]
 #[repr(transparent)]
-pub struct Builtins(HashMap<&'static str, BuiltinFunc>);
+pub struct Builtins(HashMap<String, BuiltinFunc>);
+
+#[derive(Debug, thiserror::Error)]
+pub enum BuiltinRegisterError {
+    #[error("`{0}` has already been registered as a builtin")]
+    AlreadyRegistered(String),
+}
 
 impl Builtins {
-    pub fn from_builtins(builtins: &[Builtin]) -> Self {
+    pub fn register(&mut self, builtin: Builtin) -> Result<(), BuiltinRegisterError> {
+        if self
+            .0
+            .insert(builtin.name.to_string(), builtin.function)
+            .is_some()
+        {
+            return Err(BuiltinRegisterError::AlreadyRegistered(
+                builtin.name.to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    pub fn from_builtins(builtins: &[Builtin]) -> Result<Self, BuiltinRegisterError> {
         let mut map = HashMap::new();
 
         for Builtin { name, function } in builtins {
-            if map.insert(*name, *function).is_some() {
-                panic!("tried to overwrite a builtin: {name}")
+            if map.insert(name.to_string(), *function).is_some() {
+                return Err(BuiltinRegisterError::AlreadyRegistered(name.to_string()));
             }
         }
 
-        Self(map)
+        Ok(Self(map))
     }
 
     pub fn get(&self, name: &str) -> Option<BuiltinFunc> {
