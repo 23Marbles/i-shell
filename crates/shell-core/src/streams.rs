@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::codec::{self, Header, WireDecode, WireEncode, decode, encode};
@@ -46,6 +48,12 @@ pub struct StreamTx {
     inner: Box<dyn StreamSender + Send + Sync>,
 }
 
+impl Debug for StreamTx {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StreamTx").finish_non_exhaustive()
+    }
+}
+
 impl StreamTx {
     pub async fn send<T: WireEncode>(&mut self, value: T) -> Result<(), StreamSendError> {
         self.inner.send(encode(value)).await
@@ -58,6 +66,12 @@ impl StreamTx {
 
 pub struct StreamRx {
     inner: Box<dyn StreamReceiver + Send + Sync>,
+}
+
+impl Debug for StreamRx {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StreamRx").finish_non_exhaustive()
+    }
 }
 
 #[async_trait::async_trait]
