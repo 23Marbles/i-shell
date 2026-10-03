@@ -1,18 +1,37 @@
-use std::collections::VecDeque;
+use std::{
+    collections::VecDeque,
+    fmt::{Display, Write},
+};
 
-use crate::command::{Args, Command, Pipeline};
+use crate::command::{Args, Command, chain::ChainedCommand};
+
+pub mod token;
 
 #[derive(Debug, thiserror::Error)]
-pub enum PipelineParseErr {}
+pub enum ParseErr {}
+
+//pub struct Parser<'a> {
+//    remaining: &'a str,
+//    tokens: Vec<Token<'a>>,
+//}
 
 #[derive(Default)]
 pub struct ParseState {
-    pub single: bool,
-    pub double: bool,
+    pub q_single: bool,
+    pub q_double: bool,
 }
 
-impl Pipeline {
-    pub fn parse(s: &str) -> Option<Result<Self, PipelineParseErr>> {
+/*impl Parser<'_> {
+    pub fn next_token(&self) -> Result<Option<Token>, ParseErr> {
+        if self.remaining.is_empty() {
+            return Ok(None);
+        };
+
+        let mut buf = String::new();
+
+        Ok(())
+    }
+    /* pub fn parse(s: &str) -> Option<Result<ChainedCommand, PipelineParseErr>> {
         let mut state = ParseState::default();
 
         let mut args = VecDeque::new();
@@ -41,5 +60,6 @@ impl Pipeline {
                 },
             },
         }))
-    }
+    } */
 }
+*/

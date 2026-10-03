@@ -35,27 +35,27 @@ impl Highlighter for LineHelper {
 
         for ch in line.chars() {
             match ch {
-                '"' if state.double || !state.single => {
-                    if state.double {
+                '"' if state.q_double || !state.q_single => {
+                    if state.q_double {
                         buf.push_str("\"\x1b[0m");
-                        state.double = false;
+                        state.q_double = false;
                         continue;
                     } else {
                         buf.push_str("\x1b[32m");
-                        state.double = true
+                        state.q_double = true
                     }
                 }
-                '\'' if state.single || !state.double => {
-                    if state.single {
+                '\'' if state.q_single || !state.q_double => {
+                    if state.q_single {
                         buf.push_str("'\x1b[0m");
-                        state.single = false;
+                        state.q_single = false;
                         continue;
                     } else {
                         buf.push_str("\x1b[32m");
-                        state.single = true
+                        state.q_single = true
                     }
                 }
-                ' ' if !state.double && !state.single && is_first => {
+                ' ' if !state.q_double && !state.q_single && is_first => {
                     buf.push_str("\x1b[0m");
                     is_first = false
                 }

@@ -17,10 +17,6 @@ pub mod chain;
 pub mod context;
 pub mod program;
 
-pub struct Pipeline {
-    pub cmd: Command,
-}
-
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Debug, Clone)]
 pub struct Command {
