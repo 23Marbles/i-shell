@@ -25,6 +25,7 @@ impl StreamSender for Stderr {
         value: bytes::Bytes,
     ) -> Result<(), StreamSendError> {
         self.inner.write_all(&value).await?;
+        self.inner.flush().await?;
 
         Ok(())
     }
@@ -50,6 +51,7 @@ impl StreamSender for Stdout {
         value: bytes::Bytes,
     ) -> Result<(), StreamSendError> {
         self.inner.write_all(&value).await?;
+        self.inner.flush().await?;
 
         Ok(())
     }

@@ -150,7 +150,10 @@ builtin_list!(
     };
 
     PWD = "pwd" |mut ctx, args| {
-        btry!(ctx.println(ctx.current_dir().await.display()).await);
+        let path = ctx.current_dir().await;
+        let display = path.to_string_lossy();
+        let display = display.strip_prefix(r"\\?\").unwrap_or(&display);
+        btry!(ctx.println(display.to_string()).await);
         Ok(CommandResult::Continue)
     };
 

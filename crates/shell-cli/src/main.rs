@@ -21,17 +21,21 @@ async fn main() -> Result<ExitCode, ReadlineError> {
             shell_handle
                 .shell(|shell| {
                     #[cfg(target_os = "windows")]
-                    return shell.cwd.clone().into_os_string();
+                    return {
+                        let path = shell.cwd.clone();
+                        let string = path.to_string_lossy();
+
+                        string.strip_prefix(r"\\?\").unwrap_or(&string).to_string()
+                    };
 
                     #[cfg(not(target_os = "windows"))]
                     return shell
                         .cwd
                         .to_path_buf()
                         .file_name()
-                        .map_or(std::ffi::OsString::new(), |n| n.to_os_string());
+                        .map_or("/".to_string(), |n| n.to_string_lossy().into_owned());
                 })
                 .await
-                .display()
         )) {
             Ok(s) => {
                 rl.add_history_entry(&s)?;
