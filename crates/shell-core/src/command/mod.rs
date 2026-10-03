@@ -13,6 +13,7 @@ pub struct Args {
 }
 
 pub mod builtin;
+pub mod chain;
 pub mod context;
 pub mod program;
 
@@ -41,6 +42,7 @@ impl Command {
     }
 }
 
+#[derive(Debug)]
 pub enum ResolvedCommand {
     Builtin {
         name: String,

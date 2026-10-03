@@ -1,10 +1,12 @@
 use std::fmt::Debug;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio_util::sync::CancellationToken;
 
 use crate::codec::{self, Header, WireDecode, WireEncode, decode, encode};
 
 pub mod adapter;
+pub mod process;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StreamError {
@@ -23,7 +25,11 @@ pub enum StreamSendError {
 
 #[async_trait::async_trait]
 pub trait StreamSender: Send {
-    async fn send(&mut self, value: bytes::Bytes) -> Result<(), StreamSendError>;
+    async fn send(
+        &mut self,
+        header: Option<Header>,
+        value: bytes::Bytes,
+    ) -> Result<(), StreamSendError>;
 }
 
 impl<T: StreamSender + Send + Sync + 'static> From<T> for StreamTx {
@@ -36,7 +42,14 @@ impl<T: StreamSender + Send + Sync + 'static> From<T> for StreamTx {
 
 #[async_trait::async_trait]
 impl<W: AsyncWriteExt + Send + Unpin> StreamSender for W {
-    async fn send(&mut self, data: bytes::Bytes) -> Result<(), StreamSendError> {
+    async fn send(
+        &mut self,
+        header: Option<Header>,
+        data: bytes::Bytes,
+    ) -> Result<(), StreamSendError> {
+        if let Some(header) = header {
+            self.write_all(&header.encode_bytes()).await?;
+        }
         self.write_all(&data).await?;
         self.flush().await?;
 
@@ -56,11 +69,39 @@ impl Debug for StreamTx {
 
 impl StreamTx {
     pub async fn send<T: WireEncode>(&mut self, value: T) -> Result<(), StreamSendError> {
-        self.inner.send(encode(value)).await
+        let (header, b) = encode(value);
+
+        self.inner.send(Some(header), b).await
     }
 
     pub async fn send_raw(&mut self, value: bytes::Bytes) -> Result<(), StreamSendError> {
-        self.inner.send(value).await
+        self.inner.send(None, value).await
+    }
+
+    pub async fn send_reader<R: tokio::io::AsyncRead + Unpin>(
+        &mut self,
+        mut reader: R,
+        cancel: CancellationToken,
+    ) -> Result<(), StreamError> {
+        let mut buf = [0; 8192];
+
+        loop {
+            let len = tokio::select! {
+                _ = cancel.cancelled() => return Ok(()),
+                result = reader.read(&mut buf) => {
+                    result.map_err(StreamReceiveError::from)?
+                },
+            };
+
+            if len == 0 {
+                return Ok(());
+            }
+
+            tokio::select! {
+                _ = cancel.cancelled() => return Ok(()),
+                result = self.send(buf[..len].to_vec()) => result?,
+            }
+        }
     }
 }
 
@@ -125,6 +166,33 @@ pub enum StreamReceiveError {
 }
 
 impl StreamRx {
+    pub async fn copy_to<W: tokio::io::AsyncWrite + Unpin>(
+        &mut self,
+        mut writer: W,
+        cancel: CancellationToken,
+    ) -> Result<(), StreamError> {
+        loop {
+            let bytes = tokio::select! {
+                _ = cancel.cancelled() => return Ok(()),
+                result = self.recv::<Vec<u8>>() => match result {
+                    Ok(bytes) => bytes,
+                    Err(StreamReceiveError::SenderClosed) => return Ok(()),
+                    Err(error) => return Err(error.into()),
+                },
+            };
+
+            tokio::select! {
+                _ = cancel.cancelled() => return Ok(()),
+                result = async {
+                    writer.write_all(&bytes).await?;
+                    writer.flush().await
+                } => {
+                    result.map_err(StreamSendError::from)?
+                },
+            }
+        }
+    }
+
     pub async fn recv_chunk(&mut self, buf: &mut [u8]) -> Result<usize, StreamReceiveError> {
         let len = self.inner.recv(buf).await?;
 
@@ -164,8 +232,9 @@ impl StreamRx {
 
 #[cfg(test)]
 mod tests {
-    use super::{StreamReceiveError, StreamReceiver, StreamRx};
-    use tokio::io::{AsyncWriteExt, duplex};
+    use super::{StreamReceiveError, StreamReceiver, StreamRx, StreamTx};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
+    use tokio_util::sync::CancellationToken;
 
     #[tokio::test]
     async fn recv_exact_reports_eof() {
@@ -192,5 +261,43 @@ mod tests {
             receiver.recv_chunk(&mut buf).await,
             Err(StreamReceiveError::SenderClosed)
         ));
+    }
+
+    #[tokio::test]
+    async fn send_reader_frames_raw_bytes() {
+        let (mut raw_writer, raw_reader) = duplex(64);
+        let (wire_writer, wire_reader) = duplex(64);
+        raw_writer.write_all(b"hello").await.unwrap();
+        drop(raw_writer);
+
+        let mut sender = StreamTx::from(wire_writer);
+        sender
+            .send_reader(raw_reader, CancellationToken::new())
+            .await
+            .unwrap();
+        drop(sender);
+
+        let mut receiver = StreamRx::from(wire_reader);
+        assert_eq!(receiver.recv::<Vec<u8>>().await.unwrap(), b"hello");
+    }
+
+    #[tokio::test]
+    async fn copy_to_writes_framed_bytes_to_raw_writer() {
+        let (wire_writer, wire_reader) = duplex(64);
+        let (mut raw_reader, raw_writer) = duplex(64);
+
+        let mut sender = StreamTx::from(wire_writer);
+        sender.send(b"hello".to_vec()).await.unwrap();
+        drop(sender);
+
+        let mut receiver = StreamRx::from(wire_reader);
+        receiver
+            .copy_to(raw_writer, CancellationToken::new())
+            .await
+            .unwrap();
+
+        let mut bytes = Vec::new();
+        raw_reader.read_to_end(&mut bytes).await.unwrap();
+        assert_eq!(bytes, b"hello");
     }
 }

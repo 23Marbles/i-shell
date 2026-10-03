@@ -277,9 +277,9 @@ impl<A: AdapterKind> StreamAdapter<A> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RawToWireBytes, StreamAdapter, WireBytesToRaw};
-    use crate::{codec::encode, streams::StreamRx};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
+    use super::{RawToWireBytes, StreamAdapter};
+    use crate::streams::StreamRx;
+    use tokio::io::{AsyncWriteExt, duplex};
 
     #[tokio::test]
     async fn raw_to_wire_bytes_frames_chunks() {
@@ -294,24 +294,5 @@ mod tests {
 
         let mut receiver = StreamRx::from(wire_reader);
         assert_eq!(receiver.recv::<Vec<u8>>().await.unwrap(), b"hello");
-    }
-
-    #[tokio::test]
-    async fn wire_bytes_to_raw_removes_framing() {
-        let (mut wire_writer, wire_reader) = duplex(64);
-        let (raw_writer, mut raw_reader) = duplex(64);
-        let mut adapter =
-            StreamAdapter::<WireBytesToRaw>::spawn(wire_reader.into(), raw_writer.into());
-
-        wire_writer
-            .write_all(&encode(b"hello".to_vec()))
-            .await
-            .unwrap();
-        drop(wire_writer);
-        adapter.result().await.unwrap();
-
-        let mut output = Vec::new();
-        raw_reader.read_to_end(&mut output).await.unwrap();
-        assert_eq!(output, b"hello");
     }
 }

@@ -5,6 +5,7 @@ use crate::{
     streams::{StreamReceiveError, StreamRx, StreamSendError, StreamTx},
 };
 
+#[derive(Debug)]
 pub struct CommandContext {
     shell_handle: ShellHandle,
     pub stdin: Option<StreamRx>,
@@ -56,9 +57,9 @@ impl CommandContext {
         if let Some(ref mut out) = self.stdout {
             out.send(v.to_string().into_bytes()).await
         } else {
-            print!("{v}");
+            let mut shell = self.shell_handle.handle.write().await;
 
-            Ok(())
+            shell.print(v.to_string()).await
         }
     }
 
@@ -66,9 +67,9 @@ impl CommandContext {
         if let Some(ref mut out) = self.stdout {
             out.send(format!("{v}\n").into_bytes()).await
         } else {
-            println!("{v}");
+            let mut shell = self.shell_handle.handle.write().await;
 
-            Ok(())
+            shell.println(v.to_string()).await
         }
     }
 
@@ -76,9 +77,9 @@ impl CommandContext {
         if let Some(ref mut err) = self.stderr {
             err.send(v.to_string().into_bytes()).await
         } else {
-            eprint!("{v}");
+            let mut shell = self.shell_handle.handle.write().await;
 
-            Ok(())
+            shell.eprint(v.to_string()).await
         }
     }
 
@@ -86,9 +87,9 @@ impl CommandContext {
         if let Some(ref mut err) = self.stderr {
             err.send(format!("{v}\n").into_bytes()).await
         } else {
-            eprintln!("{v}");
+            let mut shell = self.shell_handle.handle.write().await;
 
-            Ok(())
+            shell.eprintln(v.to_string()).await
         }
     }
 

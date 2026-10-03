@@ -7,7 +7,10 @@ use std::{
 use pathsearch::find_executable_in_path;
 use tokio::sync::RwLock;
 
-use crate::command::builtin::{BUILTINS, Builtin, BuiltinFunc, BuiltinRegisterError, Builtins};
+use crate::{
+    command::builtin::{BUILTINS, Builtin, BuiltinFunc, BuiltinRegisterError, Builtins},
+    streams::{StreamRx, StreamSendError, StreamTx},
+};
 
 #[derive(Debug, Clone)]
 pub struct ShellHandle {
@@ -38,6 +41,9 @@ impl From<Shell> for ShellHandle {
 pub struct Shell {
     pub cwd: PathBuf,
     builtins: Builtins,
+    stderr: StreamTx,
+    stdout: StreamTx,
+    stdin: StreamRx,
 }
 
 impl Default for Shell {
@@ -50,11 +56,30 @@ impl Default for Shell {
                 panic!()
             }),
             builtins: Builtins::from_builtins(BUILTINS).unwrap(),
+            stderr: StreamTx::from(crate::streams::process::Stderr::new()),
+            stdout: StreamTx::from(crate::streams::process::Stdout::new()),
+            stdin: StreamRx::from(crate::streams::process::Stdin::new()),
         }
     }
 }
 
 impl Shell {
+    pub async fn print(&mut self, s: String) -> Result<(), StreamSendError> {
+        self.stdout.send_raw(s.into()).await
+    }
+
+    pub async fn println(&mut self, s: String) -> Result<(), StreamSendError> {
+        self.stdout.send_raw(format!("{s}\n").into()).await
+    }
+
+    pub async fn eprint(&mut self, s: String) -> Result<(), StreamSendError> {
+        self.stderr.send_raw(s.into()).await
+    }
+
+    pub async fn eprintln(&mut self, s: String) -> Result<(), StreamSendError> {
+        self.stderr.send_raw(format!("{s}\n").into()).await
+    }
+
     #[inline]
     pub fn add_builtin(&mut self, builtin: Builtin) -> Result<(), BuiltinRegisterError> {
         self.builtins.register(builtin)

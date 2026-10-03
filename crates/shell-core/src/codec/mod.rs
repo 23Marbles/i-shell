@@ -167,18 +167,13 @@ pub trait WireEncode: WireType {
     fn encode_body(&self, buf: &mut impl WireWrite);
 }
 
-pub fn encode<T: WireEncode>(value: T) -> bytes::Bytes {
+pub fn encode<T: WireEncode>(value: T) -> (Header, bytes::Bytes) {
     let mut body = BytesMut::new();
     value.encode_body(&mut body);
 
     let header = Header::new::<T>(body.len());
 
-    let mut frame = BytesMut::with_capacity(8 + body.len());
-
-    frame.extend_from_slice(&header.encode());
-    frame.extend_from_slice(&body);
-
-    frame.freeze()
+    (header, body.freeze())
 }
 
 pub fn decode<T: WireDecode>(header: Header, buf: &mut &[u8]) -> Result<T, DecodeErr> {

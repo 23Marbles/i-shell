@@ -1,8 +1,12 @@
-use tokio::{select, task::JoinSet};
+use tokio::{
+    select,
+    task::{JoinHandle, JoinSet},
+};
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     command::{Args, CommandError, IntoCommandError, context::CommandContext},
-    streams::adapter::{AdapterError, RawToWireBytes, StreamAdapter, WireBytesToRaw},
+    streams::adapter::AdapterError,
 };
 use std::{
     path::PathBuf,
@@ -17,9 +21,10 @@ pub struct Program {
 }
 
 pub struct Adapters {
-    stdout_adapter: Option<StreamAdapter<RawToWireBytes>>,
-    stderr_adapter: Option<StreamAdapter<RawToWireBytes>>,
-    stdin_adapter: Option<StreamAdapter<WireBytesToRaw>>,
+    stdout_adapter: Option<JoinHandle<Result<(), AdapterError>>>,
+    stderr_adapter: Option<JoinHandle<Result<(), AdapterError>>>,
+    stdin_adapter: Option<JoinHandle<Result<(), AdapterError>>>,
+    stdin_cancel: Option<CancellationToken>,
 }
 
 impl Program {
@@ -58,17 +63,40 @@ impl Program {
             Err(e) => return Err(CommandError::io(path.to_string_lossy(), args, e)),
         };
 
+        let mut stdin_cancel = None;
         let stdin_adapter = has_stdin_adapter.then(|| {
             let stdin = child.stdin.take().expect("Just set the stdin as piped");
-            StreamAdapter::<WireBytesToRaw>::spawn(ctx.stdin.unwrap(), stdin.into())
+            let cancel = CancellationToken::new();
+            let task_cancel = cancel.clone();
+            let mut stream = ctx.stdin.unwrap();
+            stdin_cancel = Some(cancel);
+
+            tokio::spawn(async move {
+                stream
+                    .copy_to(stdin, task_cancel)
+                    .await
+                    .map_err(AdapterError::from)
+            })
         });
         let stdout_adapter = has_stdout_adapter.then(|| {
             let stdout = child.stdout.take().expect("Just set the stdout as piped");
-            StreamAdapter::<RawToWireBytes>::spawn(stdout.into(), ctx.stdout.unwrap())
+            let mut stream = ctx.stdout.unwrap();
+            tokio::spawn(async move {
+                stream
+                    .send_reader(stdout, CancellationToken::new())
+                    .await
+                    .map_err(AdapterError::from)
+            })
         });
         let stderr_adapter = has_stderr_adapter.then(|| {
             let stderr = child.stderr.take().expect("Just set the stderr as piped");
-            StreamAdapter::<RawToWireBytes>::spawn(stderr.into(), ctx.stderr.unwrap())
+            let mut stream = ctx.stderr.unwrap();
+            tokio::spawn(async move {
+                stream
+                    .send_reader(stderr, CancellationToken::new())
+                    .await
+                    .map_err(AdapterError::from)
+            })
         });
 
         Ok(Self {
@@ -79,6 +107,7 @@ impl Program {
                 stdout_adapter,
                 stderr_adapter,
                 stdin_adapter,
+                stdin_cancel,
             },
         })
     }
@@ -90,16 +119,10 @@ impl Program {
             stdout_adapter,
             stderr_adapter,
             stdin_adapter,
+            stdin_cancel,
         } = self.adapters;
 
-        let stdin_cancel = stdin_adapter
-            .as_ref()
-            .map(StreamAdapter::cancellation_token);
-        let adapter_handles = [
-            stdout_adapter.map(StreamAdapter::into_join_handle),
-            stderr_adapter.map(StreamAdapter::into_join_handle),
-            stdin_adapter.map(StreamAdapter::into_join_handle),
-        ];
+        let adapter_handles = [stdout_adapter, stderr_adapter, stdin_adapter];
 
         for handle in adapter_handles.into_iter().flatten() {
             adapter_tasks.spawn(async move {
