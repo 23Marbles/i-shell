@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 276.6 75" width="276.6" height="75" role="img"><style>.rail { fill: none; stroke: #394656; stroke-width: 1.5; }
+.arrow { fill: #394656; }
+.terminal { fill: #eef3fb; stroke: #3a67a8; stroke-width: 1.5; }
+.nonterminal { fill: #ffffff; stroke: #394656; stroke-width: 1.5; }
+.special { fill: #fff6e6; stroke: #b8860b; stroke-width: 1.5; }
+.exception { fill: #fdeceb; stroke: #b0413a; stroke-width: 1.5; }
+.lbl { fill: #1b2430; font-family: 'SFMono-Regular','Consolas','Liberation Mono',monospace; font-size: 13px; text-anchor: middle; dominant-baseline: central; }
+.count-bg { fill: #ffffff; }
+.count { fill: #6a7686; font-family: 'SFMono-Regular','Consolas',monospace; font-size: 11px; text-anchor: middle; dominant-baseline: central; }</style><path class="rail" d="M 8 28 L 8 42"/><path class="rail" d="M 8 35 L 20 35"/><path class="rail" d="M 20 35 L 40 35"/><rect class="nonterminal" x="40" y="23" width="51.6" height="24" rx="3"/><text class="lbl" x="65.8" y="35">char</text><path class="rail" d="M 91.6 35 L 111.6 35"/><path class="rail" d="M 91.6 35 L 101.6 35 Q 111.6 35 111.6 45 L 111.6 52 Q 111.6 62 101.6 62 L 30 62 Q 20 62 20 52 L 20 45 Q 20 35 30 35 L 40 35"/><polygon class="arrow" points="69.8,58 61.8,62 69.8,66"/><path class="rail" d="M 111.6 35 L 123.6 35"/><path class="rail" d="M 123.6 35 L 143.6 35"/><rect class="terminal" x="143.6" y="23" width="29.4" height="24" rx="12"/><text class="lbl" x="158.3" y="35"> </text><path class="rail" d="M 173 35 L 185 35"/><rect class="nonterminal" x="185" y="23" width="51.6" height="24" rx="3"/><text class="lbl" x="210.8" y="35">args</text><path class="rail" d="M 236.6 35 L 256.6 35"/><path class="rail" d="M 123.6 35 L 128.6 35 Q 133.6 35 133.6 30 L 133.6 18 Q 133.6 8 143.6 8 L 236.6 8 Q 246.6 8 246.6 18 L 246.6 30 Q 246.6 35 251.6 35 L 256.6 35"/><path class="rail" d="M 256.6 35 L 268.6 35"/><path class="rail" d="M 268.6 28 L 268.6 42"/></svg>

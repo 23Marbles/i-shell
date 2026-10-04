@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 124.2 79" width="124.2" height="79" role="img"><style>.rail { fill: none; stroke: #394656; stroke-width: 1.5; }
+.arrow { fill: #394656; }
+.terminal { fill: #eef3fb; stroke: #3a67a8; stroke-width: 1.5; }
+.nonterminal { fill: #ffffff; stroke: #394656; stroke-width: 1.5; }
+.special { fill: #fff6e6; stroke: #b8860b; stroke-width: 1.5; }
+.exception { fill: #fdeceb; stroke: #b0413a; stroke-width: 1.5; }
+.lbl { fill: #1b2430; font-family: 'SFMono-Regular','Consolas','Liberation Mono',monospace; font-size: 13px; text-anchor: middle; dominant-baseline: central; }
+.count-bg { fill: #ffffff; }
+.count { fill: #6a7686; font-family: 'SFMono-Regular','Consolas',monospace; font-size: 11px; text-anchor: middle; dominant-baseline: central; }</style><path class="rail" d="M 8 13 L 8 27"/><path class="rail" d="M 8 20 L 20 20"/><path class="rail" d="M 20 20 L 40 20"/><rect class="nonterminal" x="40" y="8" width="44.2" height="24" rx="3"/><text class="lbl" x="62.1" y="20">arg</text><path class="rail" d="M 84.2 20 L 104.2 20"/><path class="rail" d="M 84.2 20 L 94.2 20 Q 104.2 20 104.2 30 L 104.2 49 Q 104.2 59 94.2 59 L 30 59 Q 20 59 20 49 L 20 30 Q 20 20 30 20 L 40 20"/><rect class="terminal" x="47.4" y="47" width="29.4" height="24" rx="12"/><text class="lbl" x="62.1" y="59"> </text><polygon class="arrow" points="42.7,55 34.7,59 42.7,63"/><path class="rail" d="M 104.2 20 L 116.2 20"/><path class="rail" d="M 116.2 13 L 116.2 27"/></svg>
