@@ -8,8 +8,15 @@ pub type BuiltinFuture = Pin<Box<dyn Future<Output = Result<CommandResult, Comma
 
 pub type BuiltinFunc = fn(CommandContext, Args) -> BuiltinFuture;
 
+#[derive(Debug, thiserror::Error)]
+pub enum BuiltinRegisterError {
+    #[error("`{0}` has already been registered as a builtin")]
+    AlreadyRegistered(String),
+}
+
 pub struct Builtin {
     pub name: &'static str,
+
     function: BuiltinFunc,
 }
 
@@ -17,13 +24,11 @@ pub struct Builtin {
 #[repr(transparent)]
 pub struct Builtins(HashMap<String, BuiltinFunc>);
 
-#[derive(Debug, thiserror::Error)]
-pub enum BuiltinRegisterError {
-    #[error("`{0}` has already been registered as a builtin")]
-    AlreadyRegistered(String),
-}
-
 impl Builtins {
+    pub fn get(&self, name: &str) -> Option<BuiltinFunc> {
+        self.0.get(name).copied()
+    }
+
     pub fn register(&mut self, builtin: Builtin) -> Result<(), BuiltinRegisterError> {
         if self.0.contains_key(builtin.name) {
             Err(BuiltinRegisterError::AlreadyRegistered(
@@ -33,10 +38,6 @@ impl Builtins {
             self.0.insert(builtin.name.to_string(), builtin.function);
             Ok(())
         }
-    }
-
-    pub fn force_register(&mut self, builtin: Builtin) {
-        self.0.insert(builtin.name.to_string(), builtin.function);
     }
 
     pub fn from_builtins(builtins: &[Builtin]) -> Result<Self, BuiltinRegisterError> {
@@ -51,8 +52,8 @@ impl Builtins {
         Ok(Self(map))
     }
 
-    pub fn get(&self, name: &str) -> Option<BuiltinFunc> {
-        self.0.get(name).copied()
+    pub fn force_register(&mut self, builtin: Builtin) {
+        self.0.insert(builtin.name.to_string(), builtin.function);
     }
 }
 

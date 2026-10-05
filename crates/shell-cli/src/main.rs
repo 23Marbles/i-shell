@@ -1,3 +1,5 @@
+mod helper;
+
 use std::process::ExitCode;
 
 use rustyline::{Editor, error::ReadlineError};
@@ -9,7 +11,6 @@ use shell_core::{
 
 use crate::helper::LineHelper;
 
-mod helper;
 #[tokio::main]
 async fn main() -> Result<ExitCode, ReadlineError> {
     let shell_handle = Shell::default().into_handle();

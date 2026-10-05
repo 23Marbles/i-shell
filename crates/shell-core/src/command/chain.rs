@@ -9,31 +9,50 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PipeKind {
     Err,
+
     Out,
+
     None,
+}
+
+#[derive(Debug, Clone)]
+enum NextCommand {
+    Finish,
+
+    Command {
+        cmd: Box<ChainedCommand>,
+
+        pipe: PipeKind,
+    },
+}
+
+#[derive(Debug, Default)]
+pub struct CommandList {
+    inner: Vec<(CommandContext, ResolvedCommand)>,
+}
+
+impl CommandList {
+    pub fn spawn_all(self) -> JoinSet<Result<CommandResult, CommandError>> {
+        let mut set = JoinSet::new();
+
+        for (ctx, cmd) in self.inner.into_iter() {
+            let _ = set.spawn(cmd.run(ctx));
+        }
+
+        set
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct ChainedCommand {
     cmd: Command,
+
     next: Option<NextCommand>,
-}
-
-#[derive(Debug, Clone)]
-enum NextCommand {
-    Command {
-        pipe: PipeKind,
-        cmd: Box<ChainedCommand>,
-    },
-    Finish,
-}
-
-pub struct ChainedCommandIter {
-    current: Option<ChainedCommand>,
 }
 
 impl IntoIterator for ChainedCommand {
     type Item = (PipeKind, Command);
+
     type IntoIter = ChainedCommandIter;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -41,6 +60,10 @@ impl IntoIterator for ChainedCommand {
             current: Some(self),
         }
     }
+}
+
+pub struct ChainedCommandIter {
+    current: Option<ChainedCommand>,
 }
 
 impl Iterator for ChainedCommandIter {
@@ -58,23 +81,6 @@ impl Iterator for ChainedCommandIter {
         };
 
         Some((output_pipe, cmd))
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct CommandList {
-    inner: Vec<(CommandContext, ResolvedCommand)>,
-}
-
-impl CommandList {
-    pub fn spawn_all(self) -> JoinSet<Result<CommandResult, CommandError>> {
-        let mut set = JoinSet::new();
-
-        for (ctx, cmd) in self.inner.into_iter() {
-            let _ = set.spawn(cmd.run(ctx));
-        }
-
-        set
     }
 }
 

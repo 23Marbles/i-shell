@@ -1,10 +1,10 @@
+pub mod shell;
+
 use std::{error::Error, io::stdin, net::SocketAddr, process::ExitCode};
 
 use tokio::net::TcpSocket;
 
 use crate::shell::HeadlessShell;
-
-pub mod shell;
 
 #[tokio::main]
 async fn main() -> Result<ExitCode, Box<dyn Error>> {

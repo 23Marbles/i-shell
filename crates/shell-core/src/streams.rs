@@ -1,27 +1,12 @@
+pub mod adapter;
+pub mod process;
+
 use std::fmt::Debug;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
 
 use crate::codec::{self, Header, WireDecode, WireEncode, decode, encode};
-
-pub mod adapter;
-pub mod process;
-
-#[derive(Debug, thiserror::Error)]
-pub enum StreamError {
-    #[error(transparent)]
-    Send(#[from] StreamSendError),
-
-    #[error(transparent)]
-    Receive(#[from] StreamReceiveError),
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum StreamSendError {
-    #[error(transparent)]
-    IoErr(#[from] std::io::Error),
-}
 
 #[async_trait::async_trait]
 pub trait StreamSender: Send {
@@ -30,14 +15,6 @@ pub trait StreamSender: Send {
         header: Option<Header>,
         value: bytes::Bytes,
     ) -> Result<(), StreamSendError>;
-}
-
-impl<T: StreamSender + Send + Sync + 'static> From<T> for StreamTx {
-    fn from(value: T) -> Self {
-        Self {
-            inner: Box::new(value),
-        }
-    }
 }
 
 #[async_trait::async_trait]
@@ -57,14 +34,64 @@ impl<W: AsyncWriteExt + Send + Unpin> StreamSender for W {
     }
 }
 
-pub struct StreamTx {
-    inner: Box<dyn StreamSender + Send + Sync>,
+#[async_trait::async_trait]
+pub trait StreamReceiver: Send {
+    async fn recv(&mut self, buf: &mut [u8]) -> Result<usize, StreamReceiveError>;
+    async fn recv_exact(&mut self, buf: &mut [u8]) -> Result<(), StreamReceiveError> {
+        let mut left = buf;
+
+        while !left.is_empty() {
+            let taken = self.recv(left).await?;
+
+            if taken == 0 {
+                return Err(StreamReceiveError::SenderClosed);
+            }
+
+            (_, left) = left.split_at_mut(taken);
+        }
+
+        Ok(())
+    }
 }
 
-impl Debug for StreamTx {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StreamTx").finish_non_exhaustive()
+#[async_trait::async_trait]
+impl<R: AsyncReadExt + Send + Unpin> StreamReceiver for R {
+    async fn recv(&mut self, buf: &mut [u8]) -> Result<usize, StreamReceiveError> {
+        let len = self.read(buf).await?;
+
+        Ok(len)
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum StreamError {
+    #[error(transparent)]
+    Send(#[from] StreamSendError),
+
+    #[error(transparent)]
+    Receive(#[from] StreamReceiveError),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum StreamSendError {
+    #[error(transparent)]
+    IoErr(#[from] std::io::Error),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum StreamReceiveError {
+    #[error(transparent)]
+    IoErr(#[from] std::io::Error),
+
+    #[error(transparent)]
+    Decode(#[from] codec::DecodeErr),
+
+    #[error("the sender has been closed")]
+    SenderClosed,
+}
+
+pub struct StreamTx {
+    inner: Box<dyn StreamSender + Send + Sync>,
 }
 
 impl StreamTx {
@@ -73,11 +100,9 @@ impl StreamTx {
 
         self.inner.send(Some(header), b).await
     }
-
     pub async fn send_raw(&mut self, value: bytes::Bytes) -> Result<(), StreamSendError> {
         self.inner.send(None, value).await
     }
-
     pub async fn send_reader<R: tokio::io::AsyncRead + Unpin>(
         &mut self,
         mut reader: R,
@@ -105,64 +130,22 @@ impl StreamTx {
     }
 }
 
-pub struct StreamRx {
-    inner: Box<dyn StreamReceiver + Send + Sync>,
-}
-
-impl Debug for StreamRx {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StreamRx").finish_non_exhaustive()
-    }
-}
-
-#[async_trait::async_trait]
-impl<R: AsyncReadExt + Send + Unpin> StreamReceiver for R {
-    async fn recv(&mut self, buf: &mut [u8]) -> Result<usize, StreamReceiveError> {
-        let len = self.read(buf).await?;
-
-        Ok(len)
-    }
-}
-
-impl<R: StreamReceiver + Send + Sync + 'static> From<R> for StreamRx {
-    fn from(value: R) -> Self {
+impl<T: StreamSender + Send + Sync + 'static> From<T> for StreamTx {
+    fn from(value: T) -> Self {
         Self {
             inner: Box::new(value),
         }
     }
 }
 
-#[async_trait::async_trait]
-pub trait StreamReceiver: Send {
-    async fn recv(&mut self, buf: &mut [u8]) -> Result<usize, StreamReceiveError>;
-
-    async fn recv_exact(&mut self, buf: &mut [u8]) -> Result<(), StreamReceiveError> {
-        let mut left = buf;
-
-        while !left.is_empty() {
-            let taken = self.recv(left).await?;
-
-            if taken == 0 {
-                return Err(StreamReceiveError::SenderClosed);
-            }
-
-            (_, left) = left.split_at_mut(taken);
-        }
-
-        Ok(())
+impl Debug for StreamTx {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StreamTx").finish_non_exhaustive()
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum StreamReceiveError {
-    #[error("the sender has been closed")]
-    SenderClosed,
-
-    #[error(transparent)]
-    IoErr(#[from] std::io::Error),
-
-    #[error(transparent)]
-    Decode(#[from] codec::DecodeErr),
+pub struct StreamRx {
+    inner: Box<dyn StreamReceiver + Send + Sync>,
 }
 
 impl StreamRx {
@@ -193,16 +176,6 @@ impl StreamRx {
         }
     }
 
-    pub async fn recv_chunk(&mut self, buf: &mut [u8]) -> Result<usize, StreamReceiveError> {
-        let len = self.inner.recv(buf).await?;
-
-        if len == 0 {
-            return Err(StreamReceiveError::SenderClosed);
-        }
-
-        Ok(len)
-    }
-
     pub async fn recv<T: WireDecode>(&mut self) -> Result<T, StreamReceiveError> {
         let mut header_buf = [0u8; 8];
         self.inner.recv_exact(&mut header_buf).await?;
@@ -216,7 +189,6 @@ impl StreamRx {
 
         Ok(val)
     }
-
     pub async fn recv_raw(&mut self) -> Result<(Header, bytes::Bytes), StreamReceiveError> {
         let mut header_buf = [0u8; 8];
         self.inner.recv_exact(&mut header_buf).await?;
@@ -227,6 +199,29 @@ impl StreamRx {
         self.inner.recv_exact(&mut buf).await?;
 
         Ok((header, buf.into()))
+    }
+    pub async fn recv_chunk(&mut self, buf: &mut [u8]) -> Result<usize, StreamReceiveError> {
+        let len = self.inner.recv(buf).await?;
+
+        if len == 0 {
+            return Err(StreamReceiveError::SenderClosed);
+        }
+
+        Ok(len)
+    }
+}
+
+impl Debug for StreamRx {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StreamRx").finish_non_exhaustive()
+    }
+}
+
+impl<R: StreamReceiver + Send + Sync + 'static> From<R> for StreamRx {
+    fn from(value: R) -> Self {
+        Self {
+            inner: Box::new(value),
+        }
     }
 }
 

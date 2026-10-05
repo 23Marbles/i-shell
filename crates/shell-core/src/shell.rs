@@ -12,40 +12,63 @@ use crate::{
     streams::{StreamRx, StreamSendError, StreamTx},
 };
 
-#[derive(Debug, Clone)]
-pub struct ShellHandle {
-    pub handle: Arc<tokio::sync::RwLock<Shell>>,
-}
-
-impl ShellHandle {
-    #[must_use]
-    pub async fn shell<R>(&self, func: impl FnOnce(&Shell) -> R) -> R {
-        (func)(self.handle.read().await.deref())
-    }
-
-    #[must_use]
-    pub async fn shell_mut<R>(&self, func: impl FnOnce(&mut Shell) -> R) -> R {
-        (func)(self.handle.write().await.deref_mut())
-    }
-}
-
-impl From<Shell> for ShellHandle {
-    fn from(value: Shell) -> Self {
-        Self {
-            handle: Arc::new(RwLock::new(value)),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct Shell {
     pub cwd: PathBuf,
-    builtins: Builtins,
-    stderr: StreamTx,
-    stdout: StreamTx,
+
     stdin: StreamRx,
+
+    stderr: StreamTx,
+
+    stdout: StreamTx,
+
+    builtins: Builtins,
 }
 
+impl Shell {
+    #[inline]
+    pub fn add_builtin(&mut self, builtin: Builtin) -> Result<(), BuiltinRegisterError> {
+        self.builtins.register(builtin)
+    }
+
+    #[inline]
+    pub fn has_builtin(&self, builtin_name: &str) -> bool {
+        self.resolve_builtin(builtin_name).is_some()
+    }
+    #[inline]
+    pub fn has_program(&self, program_name: &str) -> bool {
+        self.resolve_program(program_name).is_some()
+    }
+
+    pub fn into_handle(self) -> ShellHandle {
+        ShellHandle::from(self)
+    }
+
+    #[inline]
+    pub fn resolve_builtin(&self, builtin_name: &str) -> Option<BuiltinFunc> {
+        self.builtins.get(builtin_name)
+    }
+    #[inline]
+    pub fn resolve_program(&self, program_name: &str) -> Option<PathBuf> {
+        find_executable_in_path(program_name)
+    }
+
+    pub async fn print(&mut self, s: String) -> Result<(), StreamSendError> {
+        self.stdout.send_raw(s.into()).await
+    }
+
+    pub async fn eprint(&mut self, s: String) -> Result<(), StreamSendError> {
+        self.stderr.send_raw(s.into()).await
+    }
+
+    pub async fn println(&mut self, s: String) -> Result<(), StreamSendError> {
+        self.stdout.send_raw(format!("{s}\n").into()).await
+    }
+
+    pub async fn eprintln(&mut self, s: String) -> Result<(), StreamSendError> {
+        self.stderr.send_raw(format!("{s}\n").into()).await
+    }
+}
 impl Default for Shell {
     fn default() -> Self {
         Self {
@@ -63,49 +86,26 @@ impl Default for Shell {
     }
 }
 
-impl Shell {
-    pub async fn print(&mut self, s: String) -> Result<(), StreamSendError> {
-        self.stdout.send_raw(s.into()).await
-    }
+#[derive(Debug, Clone)]
+pub struct ShellHandle {
+    pub handle: Arc<tokio::sync::RwLock<Shell>>,
+}
 
-    pub async fn println(&mut self, s: String) -> Result<(), StreamSendError> {
-        self.stdout.send_raw(format!("{s}\n").into()).await
+impl ShellHandle {
+    #[must_use]
+    pub async fn shell<R>(&self, func: impl FnOnce(&Shell) -> R) -> R {
+        (func)(self.handle.read().await.deref())
     }
-
-    pub async fn eprint(&mut self, s: String) -> Result<(), StreamSendError> {
-        self.stderr.send_raw(s.into()).await
+    #[must_use]
+    pub async fn shell_mut<R>(&self, func: impl FnOnce(&mut Shell) -> R) -> R {
+        (func)(self.handle.write().await.deref_mut())
     }
+}
 
-    pub async fn eprintln(&mut self, s: String) -> Result<(), StreamSendError> {
-        self.stderr.send_raw(format!("{s}\n").into()).await
-    }
-
-    #[inline]
-    pub fn add_builtin(&mut self, builtin: Builtin) -> Result<(), BuiltinRegisterError> {
-        self.builtins.register(builtin)
-    }
-
-    #[inline]
-    pub fn resolve_builtin(&self, builtin_name: &str) -> Option<BuiltinFunc> {
-        self.builtins.get(builtin_name)
-    }
-
-    #[inline]
-    pub fn has_builtin(&self, builtin_name: &str) -> bool {
-        self.resolve_builtin(builtin_name).is_some()
-    }
-
-    #[inline]
-    pub fn resolve_program(&self, program_name: &str) -> Option<PathBuf> {
-        find_executable_in_path(program_name)
-    }
-
-    #[inline]
-    pub fn has_program(&self, program_name: &str) -> bool {
-        self.resolve_program(program_name).is_some()
-    }
-
-    pub fn into_handle(self) -> ShellHandle {
-        ShellHandle::from(self)
+impl From<Shell> for ShellHandle {
+    fn from(value: Shell) -> Self {
+        Self {
+            handle: Arc::new(RwLock::new(value)),
+        }
     }
 }

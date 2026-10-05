@@ -7,10 +7,13 @@ use crate::{
 
 #[derive(Debug)]
 pub struct CommandContext {
-    shell_handle: ShellHandle,
     pub stdin: Option<StreamRx>,
+
     pub stdout: Option<StreamTx>,
+
     pub stderr: Option<StreamTx>,
+
+    shell_handle: ShellHandle,
 }
 
 impl CommandContext {
@@ -28,29 +31,15 @@ impl CommandContext {
         self.stdin = Some(stdin);
         self
     }
-
     #[must_use]
     pub fn with_stdout(mut self, stdout: StreamTx) -> Self {
         self.stdout = Some(stdout);
         self
     }
-
     #[must_use]
     pub fn with_stderr(mut self, stderr: StreamTx) -> Self {
         self.stderr = Some(stderr);
         self
-    }
-
-    #[must_use]
-    #[inline(always)]
-    pub async fn shell<R>(&self, func: impl FnOnce(&Shell) -> R) -> R {
-        self.shell_handle.shell(func).await
-    }
-
-    #[must_use]
-    #[inline(always)]
-    pub async fn shell_mut<R>(&self, func: impl FnOnce(&mut Shell) -> R) -> R {
-        self.shell_handle.shell_mut(func).await
     }
 
     pub async fn print<T: Display>(&mut self, v: T) -> Result<(), StreamSendError> {
@@ -60,16 +49,6 @@ impl CommandContext {
             let mut shell = self.shell_handle.handle.write().await;
 
             shell.print(v.to_string()).await
-        }
-    }
-
-    pub async fn println<T: Display>(&mut self, v: T) -> Result<(), StreamSendError> {
-        if let Some(ref mut out) = self.stdout {
-            out.send(format!("{v}\n").into_bytes()).await
-        } else {
-            let mut shell = self.shell_handle.handle.write().await;
-
-            shell.println(v.to_string()).await
         }
     }
 
@@ -83,6 +62,27 @@ impl CommandContext {
         }
     }
 
+    #[must_use]
+    #[inline(always)]
+    pub async fn shell<R>(&self, func: impl FnOnce(&Shell) -> R) -> R {
+        self.shell_handle.shell(func).await
+    }
+    #[must_use]
+    #[inline(always)]
+    pub async fn shell_mut<R>(&self, func: impl FnOnce(&mut Shell) -> R) -> R {
+        self.shell_handle.shell_mut(func).await
+    }
+
+    pub async fn println<T: Display>(&mut self, v: T) -> Result<(), StreamSendError> {
+        if let Some(ref mut out) = self.stdout {
+            out.send(format!("{v}\n").into_bytes()).await
+        } else {
+            let mut shell = self.shell_handle.handle.write().await;
+
+            shell.println(v.to_string()).await
+        }
+    }
+
     pub async fn eprintln<T: Display>(&mut self, v: T) -> Result<(), StreamSendError> {
         if let Some(ref mut err) = self.stderr {
             err.send(format!("{v}\n").into_bytes()).await
@@ -93,6 +93,10 @@ impl CommandContext {
         }
     }
 
+    pub async fn recv_stdin(&mut self) -> Option<Result<Vec<u8>, StreamReceiveError>> {
+        Some(self.stdin.as_mut()?.recv().await)
+    }
+
     #[inline(always)]
     pub async fn current_dir(&self) -> PathBuf {
         self.shell_handle.handle.read().await.cwd.clone()
@@ -101,12 +105,7 @@ impl CommandContext {
     pub async fn send_stdout(&mut self, v: Vec<u8>) -> Option<Result<(), StreamSendError>> {
         Some(self.stdout.as_mut()?.send(v).await)
     }
-
     pub async fn send_stderr(&mut self, v: Vec<u8>) -> Option<Result<(), StreamSendError>> {
         Some(self.stderr.as_mut()?.send(v).await)
-    }
-
-    pub async fn recv_stdin(&mut self) -> Option<Result<Vec<u8>, StreamReceiveError>> {
-        Some(self.stdin.as_mut()?.recv().await)
     }
 }

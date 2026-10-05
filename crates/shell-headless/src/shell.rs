@@ -11,39 +11,23 @@ use shell_core::{
 };
 use tokio::net::{TcpSocket, TcpStream};
 
+pub trait HeadlessState {
+    type ConnKind: ControlKind;
+}
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
     IoErr(#[from] std::io::Error),
+
     #[error(transparent)]
     CommandError(#[from] CommandError),
 
     #[error("")]
     CreateStreamErr {
-        kind: StreamKind,
         err: std::io::Error,
+
+        kind: StreamKind,
     },
-}
-
-impl From<Error> for RemoteCommandError {
-    fn from(value: Error) -> Self {
-        match value {
-            Error::IoErr(error) => Self::IoErr(error.to_string()),
-            Error::CommandError(command_error) => Self::CommandError(command_error.into()),
-            Error::CreateStreamErr { kind, err } => Self::CreateStreamErr {
-                kind,
-                err: err.to_string(),
-            },
-        }
-    }
-}
-
-pub trait HeadlessState {
-    type ConnKind: ControlKind;
-}
-pub struct Connected;
-impl HeadlessState for Connected {
-    type ConnKind = Remote;
 }
 
 pub struct Waiting;
@@ -51,8 +35,14 @@ impl HeadlessState for Waiting {
     type ConnKind = Negotiating;
 }
 
+pub struct Connected;
+impl HeadlessState for Connected {
+    type ConnKind = Remote;
+}
+
 pub struct HeadlessShell<S: HeadlessState> {
     stream: ControlConnection<S::ConnKind>,
+
     shell_handle: ShellHandle,
 }
 
@@ -112,7 +102,6 @@ impl HeadlessShell<Connected> {
 
         Ok(ExitCode::from(exit_code))
     }
-
     pub async fn run_cmd(
         &mut self,
         cmd: Command,
@@ -189,5 +178,17 @@ impl HeadlessShell<Connected> {
             .with_stderr(stderr.into());
 
         Ok(cmd.run(ctx).await?)
+    }
+}
+impl From<Error> for RemoteCommandError {
+    fn from(value: Error) -> Self {
+        match value {
+            Error::IoErr(error) => Self::IoErr(error.to_string()),
+            Error::CommandError(command_error) => Self::CommandError(command_error.into()),
+            Error::CreateStreamErr { kind, err } => Self::CreateStreamErr {
+                kind,
+                err: err.to_string(),
+            },
+        }
     }
 }

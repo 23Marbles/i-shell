@@ -19,9 +19,32 @@ use tokio::{
 pub trait ControllerState {
     type ConnKind: ControlKind;
 }
-pub struct Connected;
-impl ControllerState for Connected {
-    type ConnKind = Controller;
+#[derive(Debug, thiserror::Error)]
+pub enum ControlCommandError {
+    #[error("child exited with error code {0}")]
+    RemoteExited(u32),
+    #[error(transparent)]
+    RemoteCommandErr(RemoteCommandError),
+
+    #[error("error creating {kind} stream: {err}")]
+    CreateStreamErr {
+        err: std::io::Error,
+
+        kind: StreamKind,
+    },
+
+    #[error("stream adapter failed: {0}")]
+    StreamAdapterErr(String),
+
+    #[error("incorrect command id provided")]
+    MismatchedCommandIds {
+        this_id: CommandId,
+
+        remote_id: CommandId,
+    },
+
+    #[error("unexpected response while setting up or finishing command")]
+    UnexpectedRemoteMessage,
 }
 
 pub struct Waiting;
@@ -29,8 +52,14 @@ impl ControllerState for Waiting {
     type ConnKind = Negotiating;
 }
 
+pub struct Connected;
+impl ControllerState for Connected {
+    type ConnKind = Controller;
+}
+
 pub struct RemoteShellController<S: ControllerState> {
     stream: ControlConnection<S::ConnKind>,
+
     advertise_ip: IpAddr,
 }
 
@@ -51,51 +80,6 @@ impl RemoteShellController<Waiting> {
                 advertise_ip: self.advertise_ip,
             })
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ControlCommandError {
-    #[error("error creating {kind} stream: {err}")]
-    CreateStreamErr {
-        err: std::io::Error,
-        kind: StreamKind,
-    },
-    #[error("incorrect command id provided")]
-    MismatchedCommandIds {
-        this_id: CommandId,
-        remote_id: CommandId,
-    },
-    #[error(transparent)]
-    RemoteCommandErr(RemoteCommandError),
-    #[error("stream adapter failed: {0}")]
-    StreamAdapterErr(String),
-    #[error("unexpected response while setting up or finishing command")]
-    UnexpectedRemoteMessage,
-    #[error("child exited with error code {0}")]
-    RemoteExited(u32),
-}
-
-fn create_stream_listener(
-    advertise_ip: IpAddr,
-    kind: StreamKind,
-) -> Result<TcpListener, ControlCommandError> {
-    let bind_addr = match advertise_ip {
-        IpAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
-        IpAddr::V6(_) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
-    };
-
-    let listener = (|| {
-        let socket = if advertise_ip.is_ipv4() {
-            TcpSocket::new_v4()?
-        } else {
-            TcpSocket::new_v6()?
-        };
-        socket.bind(bind_addr)?;
-        socket.listen(128)
-    })()
-    .map_err(|err| ControlCommandError::CreateStreamErr { err, kind })?;
-
-    Ok(listener)
 }
 
 impl RemoteShellController<Connected> {
@@ -368,4 +352,26 @@ impl RemoteShellController<Connected> {
             }
         }
     }
+}
+fn create_stream_listener(
+    advertise_ip: IpAddr,
+    kind: StreamKind,
+) -> Result<TcpListener, ControlCommandError> {
+    let bind_addr = match advertise_ip {
+        IpAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
+        IpAddr::V6(_) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
+    };
+
+    let listener = (|| {
+        let socket = if advertise_ip.is_ipv4() {
+            TcpSocket::new_v4()?
+        } else {
+            TcpSocket::new_v6()?
+        };
+        socket.bind(bind_addr)?;
+        socket.listen(128)
+    })()
+    .map_err(|err| ControlCommandError::CreateStreamErr { err, kind })?;
+
+    Ok(listener)
 }

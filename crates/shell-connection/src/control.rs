@@ -1,6 +1,7 @@
+use std::{fmt::Display, io, marker::PhantomData, net::SocketAddr};
+
 use serde::{Deserialize, Serialize};
 use shell_core::command::{Command, wire::WireCommandError};
-use std::{fmt::Display, io, marker::PhantomData, net::SocketAddr};
 use tokio::net::TcpStream;
 
 use crate::{read_msg, write_msg};
@@ -8,15 +9,22 @@ use crate::{read_msg, write_msg};
 #[async_trait::async_trait]
 pub trait ControlKind {}
 
-pub struct Controller;
-impl ControlKind for Controller {}
+#[derive(Debug, Serialize, Deserialize)]
+pub enum StreamKind {
+    Stdin,
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
-pub struct CommandId(uuid::Uuid);
+    Stdout,
 
-impl CommandId {
-    pub fn new_random() -> Self {
-        Self(uuid::Uuid::new_v4())
+    Stderr,
+}
+
+impl Display for StreamKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StreamKind::Stdin => write!(f, "stdin"),
+            StreamKind::Stdout => write!(f, "stdout"),
+            StreamKind::Stderr => write!(f, "stderr"),
+        }
     }
 }
 
@@ -31,30 +39,39 @@ pub enum ControlMessage {
     },
 }
 
-pub struct Remote;
-impl ControlKind for Remote {}
-
 #[derive(Debug, Serialize, Deserialize)]
-pub enum StreamKind {
-    Stdin,
-    Stdout,
-    Stderr,
-}
+pub enum RemoteMessage {
+    Exit {
+        code: u32,
 
-impl Display for StreamKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            StreamKind::Stdin => write!(f, "stdin"),
-            StreamKind::Stdout => write!(f, "stdout"),
-            StreamKind::Stderr => write!(f, "stderr"),
-        }
-    }
+        cmd_id: CommandId,
+    },
+
+    SetupStreams {
+        stdin: SocketAddr,
+
+        stdout: SocketAddr,
+
+        stderr: SocketAddr,
+
+        cmd_id: CommandId,
+    },
+
+    CommandError {
+        err: RemoteCommandError,
+
+        cmd_id: CommandId,
+    },
+    CommandFinished {
+        cmd_id: CommandId,
+    },
 }
 
 #[derive(Debug, thiserror::Error, Serialize, Deserialize)]
 pub enum RemoteCommandError {
     #[error("{0}")]
     IoErr(String),
+
     #[error(transparent)]
     CommandError(#[from] WireCommandError),
 
@@ -62,42 +79,46 @@ pub enum RemoteCommandError {
     CreateStreamErr { kind: StreamKind, err: String },
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub enum RemoteMessage {
-    CommandError {
-        err: RemoteCommandError,
-        cmd_id: CommandId,
-    },
+#[derive(Debug, thiserror::Error)]
+pub enum NegotiationError {
+    #[error(transparent)]
+    IoErr(#[from] std::io::Error),
 
-    Exit {
-        code: u32,
-        cmd_id: CommandId,
-    },
-
-    SetupStreams {
-        stdin: SocketAddr,
-        stdout: SocketAddr,
-        stderr: SocketAddr,
-        cmd_id: CommandId,
-    },
-
-    CommandFinished {
-        cmd_id: CommandId,
-    },
+    #[error("expected an acceptance message")]
+    ExpectedAccept,
+    #[error("expected an attempt message")]
+    ExpectedAttempt,
 }
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum NegotiationMessage {
+    AttemptConnect,
+
+    AcceptConnection,
+}
+
+pub struct Remote;
+impl ControlKind for Remote {}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
+pub struct CommandId(uuid::Uuid);
+
+impl CommandId {
+    pub fn new_random() -> Self {
+        Self(uuid::Uuid::new_v4())
+    }
+}
+
+pub struct Controller;
+impl ControlKind for Controller {}
+
+pub struct Negotiating;
+impl ControlKind for Negotiating {}
 
 pub struct ControlConnection<K: ControlKind> {
-    pub stream: TcpStream,
     _kind: PhantomData<K>,
-}
 
-impl<K: ControlKind> From<TcpStream> for ControlConnection<K> {
-    fn from(value: TcpStream) -> Self {
-        Self {
-            stream: value,
-            _kind: PhantomData,
-        }
-    }
+    pub stream: TcpStream,
 }
 
 impl ControlConnection<Controller> {
@@ -124,27 +145,6 @@ impl ControlConnection<Controller> {
     }
 }
 
-pub struct Negotiating;
-impl ControlKind for Negotiating {}
-
-#[derive(Debug, thiserror::Error)]
-pub enum NegotiationError {
-    #[error(transparent)]
-    IoErr(#[from] std::io::Error),
-
-    #[error("expected an acceptance message")]
-    ExpectedAccept,
-
-    #[error("expected an attempt message")]
-    ExpectedAttempt,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub enum NegotiationMessage {
-    AttemptConnect,
-    AcceptConnection,
-}
-
 impl ControlConnection<Negotiating> {
     pub async fn attempt_conn(&mut self) -> Result<(), NegotiationError> {
         write_msg(&mut self.stream, &NegotiationMessage::AttemptConnect).await?;
@@ -164,5 +164,13 @@ impl ControlConnection<Negotiating> {
         }
 
         Ok(())
+    }
+}
+impl<K: ControlKind> From<TcpStream> for ControlConnection<K> {
+    fn from(value: TcpStream) -> Self {
+        Self {
+            stream: value,
+            _kind: PhantomData,
+        }
     }
 }

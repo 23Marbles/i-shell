@@ -5,6 +5,7 @@ pub enum DaemonRequest {
 }
 
 pub enum ConnectionTarget {
-    Name(String),
     Ip(SocketAddr),
+
+    Name(String),
 }

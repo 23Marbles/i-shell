@@ -11,19 +11,19 @@ use crate::{
     streams::{StreamError, StreamReceiveError, StreamRx, StreamTx},
 };
 
-#[derive(Debug, thiserror::Error)]
-pub enum AdapterError {
-    #[error("stream error: {0}")]
-    Stream(#[from] StreamError),
-
-    #[error("adapter task failed: {0}")]
-    Join(#[from] JoinError),
-}
-
 #[async_trait::async_trait]
 pub trait AdapterKind {
     async fn task(cancel: CancellationToken, rx: StreamRx, tx: StreamTx)
     -> Result<(), StreamError>;
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum AdapterError {
+    #[error("adapter task failed: {0}")]
+    Join(#[from] JoinError),
+
+    #[error("stream error: {0}")]
+    Stream(#[from] StreamError),
 }
 
 /// Removes type information when sending (the header)
@@ -56,114 +56,6 @@ impl AdapterKind for Blank {
                 }
 
                 res = tx.send_raw(bytes) => {
-                    match res {
-                        Ok(()) => (),
-                        Err(e) => return Err(e.into()),
-                    }
-                }
-            };
-        }
-
-        Ok(())
-    }
-}
-
-pub struct RawToWireBytes;
-#[async_trait::async_trait]
-impl AdapterKind for RawToWireBytes {
-    async fn task(
-        cancel: CancellationToken,
-        mut rx: StreamRx,
-        mut tx: StreamTx,
-    ) -> Result<(), StreamError> {
-        let mut buf = vec![0; 8192];
-
-        loop {
-            let len = select! {
-                _ = cancel.cancelled() => break,
-                res = rx.recv_chunk(&mut buf) => match res {
-                    Ok(len) => len,
-                    Err(StreamReceiveError::SenderClosed) => break,
-                    Err(err) => return Err(err.into()),
-                }
-            };
-
-            select! {
-                _ = cancel.cancelled() => break,
-                res = tx.send(buf[..len].to_vec()) => match res {
-                    Ok(()) => (),
-                    Err(err) => return Err(err.into()),
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
-
-pub struct WireBytesToRaw;
-#[async_trait::async_trait]
-impl AdapterKind for WireBytesToRaw {
-    async fn task(
-        cancel: CancellationToken,
-        mut rx: StreamRx,
-        mut tx: StreamTx,
-    ) -> Result<(), StreamError> {
-        loop {
-            let bytes = select! {
-                _ = cancel.cancelled() => break,
-                res = rx.recv::<Vec<u8>>() => match res {
-                    Ok(bytes) => bytes,
-                    Err(StreamReceiveError::SenderClosed) => break,
-                    Err(err) => return Err(err.into()),
-                }
-            };
-
-            select! {
-                _ = cancel.cancelled() => break,
-                res = tx.send_raw(bytes.into()) => match res {
-                    Ok(()) => (),
-                    Err(err) => return Err(err.into()),
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
-
-/// Filters the types coming through to only allow `T` through
-pub struct TypeFilter<T> {
-    _phantom: PhantomData<T>,
-}
-#[async_trait::async_trait]
-impl<T: WireDecode + WireEncode + Send> AdapterKind for TypeFilter<T> {
-    async fn task(
-        cancel: CancellationToken,
-        mut rx: StreamRx,
-        mut tx: StreamTx,
-    ) -> Result<(), StreamError> {
-        loop {
-            let t = select! {
-                _ = cancel.cancelled() => {
-                    break;
-                }
-
-                res = rx.recv::<T>() => {
-                    match res {
-                        Ok(b) => b,
-                        Err(StreamReceiveError::SenderClosed) => break,
-                        Err(e) => return Err(e.into()),
-                    }
-                }
-            };
-
-            select! {
-                _ = cancel.cancelled() => {
-                    break;
-                }
-
-                res = tx.send(t) => {
                     match res {
                         Ok(()) => (),
                         Err(e) => return Err(e.into()),
@@ -230,37 +122,59 @@ impl AdapterKind for Relay {
     }
 }
 
-pub struct StreamAdapter<A: AdapterKind> {
-    cancel_token: CancellationToken,
-    task_handle: JoinHandle<Result<(), StreamError>>,
-    _kind: PhantomData<A>,
+/// Filters the types coming through to only allow `T` through
+pub struct TypeFilter<T> {
+    _phantom: PhantomData<T>,
 }
+#[async_trait::async_trait]
+impl<T: WireDecode + WireEncode + Send> AdapterKind for TypeFilter<T> {
+    async fn task(
+        cancel: CancellationToken,
+        mut rx: StreamRx,
+        mut tx: StreamTx,
+    ) -> Result<(), StreamError> {
+        loop {
+            let t = select! {
+                _ = cancel.cancelled() => {
+                    break;
+                }
 
-impl<A: AdapterKind> StreamAdapter<A> {
-    pub fn into_join_handle(self) -> JoinHandle<Result<(), StreamError>> {
-        self.task_handle
-    }
+                res = rx.recv::<T>() => {
+                    match res {
+                        Ok(b) => b,
+                        Err(StreamReceiveError::SenderClosed) => break,
+                        Err(e) => return Err(e.into()),
+                    }
+                }
+            };
 
-    pub fn cancel(&self) {
-        self.cancel_token.cancel();
-    }
+            select! {
+                _ = cancel.cancelled() => {
+                    break;
+                }
 
-    pub fn cancellation_token(&self) -> CancellationToken {
-        self.cancel_token.clone()
-    }
-
-    pub async fn result(&mut self) -> Result<(), AdapterError> {
-        (&mut self.task_handle).await??;
+                res = tx.send(t) => {
+                    match res {
+                        Ok(()) => (),
+                        Err(e) => return Err(e.into()),
+                    }
+                }
+            };
+        }
 
         Ok(())
     }
+}
 
-    pub async fn close(mut self) -> Result<(), AdapterError> {
-        self.cancel_token.cancel();
+pub struct StreamAdapter<A: AdapterKind> {
+    _kind: PhantomData<A>,
 
-        self.result().await
-    }
+    task_handle: JoinHandle<Result<(), StreamError>>,
 
+    cancel_token: CancellationToken,
+}
+
+impl<A: AdapterKind> StreamAdapter<A> {
     pub fn spawn(reciever: StreamRx, sender: StreamTx) -> Self {
         let cancel = CancellationToken::new();
         let cancel_cloned = cancel.clone();
@@ -272,6 +186,94 @@ impl<A: AdapterKind> StreamAdapter<A> {
             task_handle: handle,
             _kind: PhantomData,
         }
+    }
+
+    pub fn cancel(&self) {
+        self.cancel_token.cancel();
+    }
+
+    pub fn into_join_handle(self) -> JoinHandle<Result<(), StreamError>> {
+        self.task_handle
+    }
+
+    pub fn cancellation_token(&self) -> CancellationToken {
+        self.cancel_token.clone()
+    }
+
+    pub async fn close(mut self) -> Result<(), AdapterError> {
+        self.cancel_token.cancel();
+
+        self.result().await
+    }
+
+    pub async fn result(&mut self) -> Result<(), AdapterError> {
+        (&mut self.task_handle).await??;
+
+        Ok(())
+    }
+}
+
+pub struct RawToWireBytes;
+#[async_trait::async_trait]
+impl AdapterKind for RawToWireBytes {
+    async fn task(
+        cancel: CancellationToken,
+        mut rx: StreamRx,
+        mut tx: StreamTx,
+    ) -> Result<(), StreamError> {
+        let mut buf = vec![0; 8192];
+
+        loop {
+            let len = select! {
+                _ = cancel.cancelled() => break,
+                res = rx.recv_chunk(&mut buf) => match res {
+                    Ok(len) => len,
+                    Err(StreamReceiveError::SenderClosed) => break,
+                    Err(err) => return Err(err.into()),
+                }
+            };
+
+            select! {
+                _ = cancel.cancelled() => break,
+                res = tx.send(buf[..len].to_vec()) => match res {
+                    Ok(()) => (),
+                    Err(err) => return Err(err.into()),
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+pub struct WireBytesToRaw;
+#[async_trait::async_trait]
+impl AdapterKind for WireBytesToRaw {
+    async fn task(
+        cancel: CancellationToken,
+        mut rx: StreamRx,
+        mut tx: StreamTx,
+    ) -> Result<(), StreamError> {
+        loop {
+            let bytes = select! {
+                _ = cancel.cancelled() => break,
+                res = rx.recv::<Vec<u8>>() => match res {
+                    Ok(bytes) => bytes,
+                    Err(StreamReceiveError::SenderClosed) => break,
+                    Err(err) => return Err(err.into()),
+                }
+            };
+
+            select! {
+                _ = cancel.cancelled() => break,
+                res = tx.send_raw(bytes.into()) => match res {
+                    Ok(()) => (),
+                    Err(err) => return Err(err.into()),
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 

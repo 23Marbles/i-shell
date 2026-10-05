@@ -4,16 +4,21 @@ use std::ops::Range;
 
 use crate::parse::token::Pipeline;
 
+pub trait ParseToken<'a>: Sized {
+    fn parse_token(parser: &mut Parser<'a>) -> Result<Self, ParseError>;
+}
 #[derive(Debug, thiserror::Error)]
 pub enum ParseError {
     #[error("the range specified was empty")]
     EmptyRange,
 
-    #[error("did not expect char '{ch}': {reason}")]
-    UnexpectedChar { ch: char, reason: String },
-
     #[error("expected char '{ch}': {reason}")]
     ExpectedChar { ch: char, reason: String },
+
+    #[error("attemted to parse past the end of the line")]
+    UnexpectedEof,
+    #[error("did not expect char '{ch}': {reason}")]
+    UnexpectedChar { ch: char, reason: String },
 
     #[error("the range indexed (`{}..{}`) is out of bounds (bounds: `{}..{}`)", range.start, range.end, bounds.start, bounds.end)]
     RangeOutOfBounds {
@@ -21,9 +26,6 @@ pub enum ParseError {
 
         bounds: Range<usize>,
     },
-
-    #[error("attemted to parse past the end of the line")]
-    UnexpectedEof,
 }
 
 pub struct Parser<'a> {
@@ -57,13 +59,6 @@ impl<'a> Parser<'a> {
 
         start..self.pos
     }
-
-    fn skip_whitespace(&mut self) {
-        while self.peek().is_some_and(char::is_whitespace) {
-            self.bump();
-        }
-    }
-
     #[must_use]
     fn consume_until(&mut self, ch: char) -> Option<Range<usize>> {
         let start = self.pos;
@@ -72,6 +67,12 @@ impl<'a> Parser<'a> {
         self.pos = end + ch.len_utf8();
 
         Some(start..end)
+    }
+
+    fn skip_whitespace(&mut self) {
+        while self.peek().is_some_and(char::is_whitespace) {
+            self.bump();
+        }
     }
 }
 
@@ -83,8 +84,4 @@ impl<'a> Parser<'a> {
     pub fn parse(&mut self) -> Result<Pipeline<'a>, ParseError> {
         Pipeline::parse_token(self)
     }
-}
-
-pub trait ParseToken<'a>: Sized {
-    fn parse_token(parser: &mut Parser<'a>) -> Result<Self, ParseError>;
 }

@@ -17,15 +17,6 @@ impl Completer for LineHelper {
     type Candidate = completion::Pair;
 }
 impl Highlighter for LineHelper {
-    fn highlight_char(
-        &self,
-        _line: &str,
-        _pos: usize,
-        _kind: rustyline::highlight::CmdKind,
-    ) -> bool {
-        true
-    }
-
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
         let mut is_first = true;
         let mut q_single = false;
@@ -68,6 +59,14 @@ impl Highlighter for LineHelper {
         buf.push_str("\x1b[0m");
 
         Cow::Owned(buf)
+    }
+    fn highlight_char(
+        &self,
+        _line: &str,
+        _pos: usize,
+        _kind: rustyline::highlight::CmdKind,
+    ) -> bool {
+        true
     }
 }
 

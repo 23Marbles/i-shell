@@ -5,6 +5,24 @@ use crate::{
     streams::{StreamReceiveError, StreamReceiver, StreamSendError, StreamSender},
 };
 
+pub struct Stdin {
+    inner: tokio::io::Stdin,
+}
+
+impl Stdin {
+    pub fn new() -> Self {
+        Self {
+            inner: tokio::io::stdin(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl StreamReceiver for Stdin {
+    async fn recv(&mut self, buf: &mut [u8]) -> Result<usize, StreamReceiveError> {
+        Ok(self.inner.read(buf).await?)
+    }
+}
 pub struct Stderr {
     inner: tokio::io::Stderr,
 }
@@ -54,24 +72,5 @@ impl StreamSender for Stdout {
         self.inner.flush().await?;
 
         Ok(())
-    }
-}
-
-pub struct Stdin {
-    inner: tokio::io::Stdin,
-}
-
-impl Stdin {
-    pub fn new() -> Self {
-        Self {
-            inner: tokio::io::stdin(),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl StreamReceiver for Stdin {
-    async fn recv(&mut self, buf: &mut [u8]) -> Result<usize, StreamReceiveError> {
-        Ok(self.inner.read(buf).await?)
     }
 }

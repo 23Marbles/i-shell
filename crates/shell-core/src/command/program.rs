@@ -1,3 +1,8 @@
+use std::{
+    path::PathBuf,
+    process::{ExitStatus, Stdio},
+};
+
 use tokio::{
     select,
     task::{JoinHandle, JoinSet},
@@ -8,23 +13,15 @@ use crate::{
     command::{Args, CommandError, IntoCommandError, context::CommandContext},
     streams::adapter::AdapterError,
 };
-use std::{
-    path::PathBuf,
-    process::{ExitStatus, Stdio},
-};
 
 pub struct Program {
     path: PathBuf,
-    args: Args,
-    child: tokio::process::Child,
-    adapters: Adapters,
-}
 
-pub struct Adapters {
-    stdout_adapter: Option<JoinHandle<Result<(), AdapterError>>>,
-    stderr_adapter: Option<JoinHandle<Result<(), AdapterError>>>,
-    stdin_adapter: Option<JoinHandle<Result<(), AdapterError>>>,
-    stdin_cancel: Option<CancellationToken>,
+    args: Args,
+
+    child: tokio::process::Child,
+
+    adapters: Adapters,
 }
 
 impl Program {
@@ -213,4 +210,12 @@ impl Program {
             ))
         }
     }
+}
+pub struct Adapters {
+    stdin_cancel: Option<CancellationToken>,
+    stdin_adapter: Option<JoinHandle<Result<(), AdapterError>>>,
+
+    stdout_adapter: Option<JoinHandle<Result<(), AdapterError>>>,
+
+    stderr_adapter: Option<JoinHandle<Result<(), AdapterError>>>,
 }

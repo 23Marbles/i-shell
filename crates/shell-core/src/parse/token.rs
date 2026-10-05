@@ -113,47 +113,6 @@ pub enum TokenPartKind {
     DoubleQuote,
 }
 
-pub struct Pipe<'a> {
-    span: Range<usize>,
-
-    location: Option<Location<'a>>,
-}
-
-impl<'a> ParseToken<'a> for Pipe<'a> {
-    fn parse_token(parser: &mut super::Parser<'a>) -> Result<Self, ParseError> {
-        let start = parser.pos;
-
-        if parser.bump() != Some('|') {
-            return Err(ParseError::ExpectedChar {
-                ch: '|',
-                reason: "expected `|` at the start of a pipe invocation".to_string(),
-            });
-        }
-
-        let loc_res = Location::parse_token(parser);
-
-        if parser.bump().ok_or(ParseError::UnexpectedEof)? == '>' {
-            Ok(Self {
-                span: start..parser.pos,
-                location: Some(loc_res?),
-            })
-        } else {
-            parser.pos = start;
-
-            parser.skip_whitespace();
-
-            if parser.peek() == Some('>') {
-                parser.bump();
-            }
-
-            Ok(Self {
-                span: start..parser.pos,
-                location: None,
-            })
-        }
-    }
-}
-
 pub struct Arg<'a> {
     span: Range<usize>,
 
@@ -199,6 +158,47 @@ impl<'a> ParseToken<'a> for Arg<'a> {
             part,
             opt_parts,
         })
+    }
+}
+
+pub struct Pipe<'a> {
+    span: Range<usize>,
+
+    location: Option<Location<'a>>,
+}
+
+impl<'a> ParseToken<'a> for Pipe<'a> {
+    fn parse_token(parser: &mut super::Parser<'a>) -> Result<Self, ParseError> {
+        let start = parser.pos;
+
+        if parser.bump() != Some('|') {
+            return Err(ParseError::ExpectedChar {
+                ch: '|',
+                reason: "expected `|` at the start of a pipe invocation".to_string(),
+            });
+        }
+
+        let loc_res = Location::parse_token(parser);
+
+        if parser.bump().ok_or(ParseError::UnexpectedEof)? == '>' {
+            Ok(Self {
+                span: start..parser.pos,
+                location: Some(loc_res?),
+            })
+        } else {
+            parser.pos = start;
+
+            parser.skip_whitespace();
+
+            if parser.peek() == Some('>') {
+                parser.bump();
+            }
+
+            Ok(Self {
+                span: start..parser.pos,
+                location: None,
+            })
+        }
     }
 }
 

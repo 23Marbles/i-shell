@@ -1,3 +1,6 @@
+pub mod control;
+pub mod daemon;
+
 use std::io;
 
 use serde::{Serialize, de::DeserializeOwned};
@@ -5,9 +8,6 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
 };
-
-pub mod control;
-pub mod daemon;
 
 async fn read_msg<T: DeserializeOwned>(stream: &mut TcpStream) -> io::Result<T> {
     let len = stream.read_u32().await? as usize;
