@@ -95,7 +95,7 @@ impl ShellHandle {
         let mut next_stdin: Option<StreamRx> = stdin;
 
         for (pipe_kind, cmd) in chained_command.into_iter() {
-            let mut ctx = CommandContext::new(&self);
+            let mut ctx = CommandContext::new(self);
 
             if let Some(stdin) = next_stdin {
                 ctx = ctx.with_stdin(stdin);
@@ -125,7 +125,7 @@ impl ShellHandle {
                 PipeKind::None => None,
             };
 
-            command_list.inner.push((ctx, cmd.resolve(&self).await?));
+            command_list.inner.push((ctx, cmd.resolve(self).await?));
         }
 
         let set = command_list.spawn_all();

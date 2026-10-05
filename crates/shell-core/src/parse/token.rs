@@ -452,18 +452,3 @@ impl<'a> ParseToken<'a> for LocationPart<'a> {
         }
     }
 }
-
-fn get_source_span(source: &str, range: Range<usize>) -> Result<&str, ParseError> {
-    let part = source
-        .get(range.clone())
-        .ok_or(ParseError::RangeOutOfBounds {
-            range: range.clone(),
-            bounds: 0..source.len(),
-        })?;
-
-    if part.is_empty() {
-        return Err(ParseError::EmptyRange);
-    };
-
-    Ok(part)
-}

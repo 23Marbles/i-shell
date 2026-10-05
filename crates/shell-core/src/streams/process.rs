@@ -9,6 +9,12 @@ pub struct Stdin {
     inner: tokio::io::Stdin,
 }
 
+impl Default for Stdin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Stdin {
     pub fn new() -> Self {
         Self {
@@ -25,6 +31,12 @@ impl StreamReceiver for Stdin {
 }
 pub struct Stderr {
     inner: tokio::io::Stderr,
+}
+
+impl Default for Stderr {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Stderr {
@@ -51,6 +63,12 @@ impl StreamSender for Stderr {
 
 pub struct Stdout {
     inner: tokio::io::Stdout,
+}
+
+impl Default for Stdout {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Stdout {

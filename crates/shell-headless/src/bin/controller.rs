@@ -71,7 +71,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             buf.trim()
         };
 
-        let mut parser = Parser::new(&line);
+        let mut parser = Parser::new(line);
 
         let pipeline = match parser.parse() {
             Ok(p) => p,

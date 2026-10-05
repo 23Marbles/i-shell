@@ -178,9 +178,9 @@ builtin_list!(
         } else {
             let curr_path = ctx.current_dir().await;
 
-            let joined = btry!(curr_path.join(join_path).canonicalize());
+            
 
-            joined
+            btry!(curr_path.join(join_path).canonicalize())
         };
 
         let _ = ctx.shell_mut(|mut shell| shell.cwd = new_path).await;
