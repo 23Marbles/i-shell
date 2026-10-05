@@ -4,7 +4,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
-use shell_core::{command::Pipeline, streams::StreamRx};
+use shell_core::{command::Command, parse::Parser, streams::StreamRx};
 use shell_headless::controller::RemoteShellController;
 use tokio::net::TcpSocket;
 
@@ -71,10 +71,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
             buf.trim()
         };
 
-        let cmd = match Pipeline::parse(line) {
-            Some(res) => res.unwrap().cmd,
-            None => continue,
+        let mut parser = Parser::new(&line);
+
+        let pipeline = match parser.parse() {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("{e}");
+                continue;
+            }
         };
+
+        let cmd = pipeline.first_command;
+
+        let cmd = Command::from_empheral(cmd);
 
         match controller
             .run_cmd(cmd, Some(StreamRx::from(tokio::io::empty())), None, None)

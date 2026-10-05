@@ -7,7 +7,6 @@ use rustyline::{
     hint::Hinter,
     validate::Validator,
 };
-use shell_core::parse::ParseState;
 
 pub struct LineHelper {}
 
@@ -29,33 +28,34 @@ impl Highlighter for LineHelper {
 
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
         let mut is_first = true;
-        let mut state = ParseState::default();
+        let mut q_single = false;
+        let mut q_double = false;
 
         let mut buf = "\x1b[33m".to_string();
 
         for ch in line.chars() {
             match ch {
-                '"' if state.q_double || !state.q_single => {
-                    if state.q_double {
+                '"' if q_double || !q_single => {
+                    if q_double {
                         buf.push_str("\"\x1b[0m");
-                        state.q_double = false;
+                        q_double = false;
                         continue;
                     } else {
                         buf.push_str("\x1b[32m");
-                        state.q_double = true
+                        q_double = true
                     }
                 }
-                '\'' if state.q_single || !state.q_double => {
-                    if state.q_single {
+                '\'' if q_single || !q_double => {
+                    if q_single {
                         buf.push_str("'\x1b[0m");
-                        state.q_single = false;
+                        q_single = false;
                         continue;
                     } else {
                         buf.push_str("\x1b[32m");
-                        state.q_single = true
+                        q_single = true
                     }
                 }
-                ' ' if !state.q_double && !state.q_single && is_first => {
+                ' ' if !q_double && !q_single && is_first => {
                     buf.push_str("\x1b[0m");
                     is_first = false
                 }
@@ -70,5 +70,6 @@ impl Highlighter for LineHelper {
         Cow::Owned(buf)
     }
 }
+
 impl Validator for LineHelper {}
 impl Helper for LineHelper {}

@@ -12,6 +12,14 @@ pub struct Args {
     pub values: Vec<String>,
 }
 
+impl Args {
+    pub fn from_empheral(args: Vec<crate::parse::token::Arg<'_>>) -> Self {
+        Self {
+            values: args.into_iter().map(|arg| arg.raw_to_string()).collect(),
+        }
+    }
+}
+
 pub mod builtin;
 pub mod chain;
 pub mod context;
@@ -25,6 +33,13 @@ pub struct Command {
 }
 
 impl Command {
+    pub fn from_empheral(cmd: crate::parse::token::Command<'_>) -> Self {
+        Self {
+            name: cmd.name.lexme.to_string(),
+            args: Args::from_empheral(cmd.args),
+        }
+    }
+
     pub async fn resolve(self, shell: &ShellHandle) -> Result<ResolvedCommand, CommandError> {
         let Self { name, args } = self;
 

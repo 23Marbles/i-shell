@@ -1,268 +1,469 @@
-use std::ops::Range;
+mod display_impls {
+    use super::*;
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum TokenKind {
-    Name,
-    Arg,
-    SingleQuoted,
-    DoubleQuoted,
-    Pipe,
-    RightAngle,
-}
+    impl Display for LocationPart<'_> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(self.lexme)
+        }
+    }
 
-impl TokenKind {
-    pub fn colour(&self) -> &'static str {
-        match self {
-            TokenKind::Name => todo!(),
-            TokenKind::Arg => todo!(),
-            TokenKind::SingleQuoted => todo!(),
-            TokenKind::DoubleQuoted => todo!(),
-            TokenKind::Pipe => todo!(),
-            TokenKind::RightAngle => todo!(),
+    impl Display for Location<'_> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            self.location.fmt(f)?;
+
+            if let Some(loc) = &self.opt_location {
+                f.write_char('@')?;
+                loc.fmt(f)?;
+            }
+
+            Ok(())
+        }
+    }
+
+    impl Display for Pipeline<'_> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            self.first_command.fmt(f)?;
+
+            for (pipe, cmd) in &self.opt_commands {
+                f.write_char(' ')?;
+                pipe.fmt(f)?;
+                f.write_char(' ')?;
+                cmd.fmt(f)?;
+            }
+
+            Ok(())
+        }
+    }
+
+    impl Display for Part<'_> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self.kind {
+                TokenPartKind::SingleQuote => {
+                    f.write_char('\'')?;
+                    f.write_str(self.lexme)?;
+                    f.write_char('\'')?;
+                }
+
+                TokenPartKind::DoubleQuote => {
+                    f.write_char('"')?;
+                    f.write_str(self.lexme)?;
+                    f.write_char('"')?;
+                }
+
+                TokenPartKind::Simple => f.write_str(self.lexme)?,
+            }
+
+            Ok(())
+        }
+    }
+
+    impl Display for Pipe<'_> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_char('|')?;
+
+            if let Some(loc) = &self.location {
+                loc.fmt(f)?;
+                f.write_char('>')?;
+            }
+
+            Ok(())
+        }
+    }
+
+    impl Display for Arg<'_> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            self.part.fmt(f)?;
+
+            for part in &self.opt_parts {
+                part.fmt(f)?;
+            }
+
+            Ok(())
+        }
+    }
+
+    impl Display for Command<'_> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            self.name.fmt(f)?;
+
+            for arg in &self.args {
+                f.write_char(' ')?;
+
+                arg.fmt(f)?;
+            }
+
+            Ok(())
         }
     }
 }
 
-pub struct ScanError {
-    source: String,
+use std::{
+    fmt::{Display, Write},
+    ops::Range,
+};
+
+use crate::parse::{ParseError, ParseToken};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenPartKind {
+    Simple,
+
+    SingleQuote,
+
+    DoubleQuote,
+}
+
+pub struct Pipe<'a> {
     span: Range<usize>,
-    kind: ScanErrorKind,
+
+    location: Option<Location<'a>>,
 }
 
-pub enum ScanErrorKind {
-    UnclosedSingleQuote,
-    UnclosedDoubleQuote,
-}
+impl<'a> ParseToken<'a> for Pipe<'a> {
+    fn parse_token(parser: &mut super::Parser<'a>) -> Result<Self, ParseError> {
+        let start = parser.pos;
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Token<'a> {
-    pub kind: TokenKind,
-    pub lexeme: &'a str,
-    pub span: Range<usize>,
-}
+        if parser.bump() != Some('|') {
+            return Err(ParseError::ExpectedChar {
+                ch: '|',
+                reason: "expected `|` at the start of a pipe invocation".to_string(),
+            });
+        }
 
-pub struct Scanner<'a> {
-    source: &'a str,
-    start: usize,
-    current: usize,
-    had_name: bool,
-}
+        let loc_res = Location::parse_token(parser);
 
-impl<'a> Scanner<'a> {
-    fn error(&self, kind: ScanErrorKind) -> ScanError {
-        ScanError {
-            source: self.source.to_owned(),
-            span: self.start..self.current,
-            kind,
+        if parser.bump().ok_or(ParseError::UnexpectedEof)? == '>' {
+            Ok(Self {
+                span: start..parser.pos,
+                location: Some(loc_res?),
+            })
+        } else {
+            parser.pos = start;
+
+            parser.skip_whitespace();
+
+            if parser.peek() == Some('>') {
+                parser.bump();
+            }
+
+            Ok(Self {
+                span: start..parser.pos,
+                location: None,
+            })
         }
     }
+}
 
-    fn error_with_span(&self, kind: ScanErrorKind, span: Range<usize>) -> ScanError {
-        ScanError {
-            source: self.source.to_owned(),
-            span,
-            kind,
+pub struct Arg<'a> {
+    span: Range<usize>,
+
+    part: Part<'a>,
+
+    opt_parts: Vec<Part<'a>>,
+}
+
+impl Arg<'_> {
+    pub fn raw_to_string(&self) -> String {
+        let mut string = String::new();
+
+        string.push_str(self.part.lexme);
+
+        for part in &self.opt_parts {
+            string.push_str(part.lexme);
         }
-    }
 
-    fn lexeme_with_bounds(&self, start: usize, end: usize) -> &'a str {
-        &self.source[start..end]
-    }
-
-    fn make_token(&self, kind: TokenKind) -> Token<'a> {
-        self.make_token_with_slice(kind, self.start, self.current)
-    }
-
-    fn make_token_with_slice(&self, kind: TokenKind, start: usize, end: usize) -> Token<'a> {
-        Token {
-            kind,
-            lexeme: self.lexeme_with_bounds(start, end),
-            span: start..end,
-        }
-    }
-
-    fn advance(&mut self) -> Option<char> {
-        let ch = self.source[self.current..].chars().next()?;
-        self.current += ch.len_utf8();
-        Some(ch)
-    }
-
-    fn span_through_match(&self, find_ch: char) -> Option<Range<usize>> {
-        let idx = self.source[self.current..].find(find_ch)?;
-
-        Some(self.start..self.source.ceil_char_boundary(self.current + idx + 1))
-    }
-
-    fn span_before_any_match(&self, find_chs: &[char]) -> Option<Range<usize>> {
-        let idx = self.source[self.current..].find(|ch| find_chs.contains(&ch))?;
-
-        Some(self.start..self.current + idx)
+        string
     }
 }
 
-impl<'a> Iterator for Scanner<'a> {
-    type Item = Result<Token<'a>, ScanError>;
+impl<'a> ParseToken<'a> for Arg<'a> {
+    fn parse_token(parser: &mut super::Parser<'a>) -> Result<Self, ParseError> {
+        let start = parser.pos;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        self.start = self.current;
+        let part = Part::parse_token(parser)?;
 
-        match self.advance()? {
-            '|' => Some(Ok(self.make_token(TokenKind::Pipe))),
-            '>' => Some(Ok(self.make_token(TokenKind::RightAngle))),
-            '\'' => Some(
-                self.span_through_match('\'')
-                    .map(|span| {
-                        self.current = span.end;
-                        let token = self.make_token_with_slice(
-                            TokenKind::SingleQuoted,
-                            self.start + 1,
-                            self.current - 1,
-                        );
+        let mut opt_parts = Vec::new();
 
-                        token
-                    })
-                    .ok_or(self.error_with_span(
-                        ScanErrorKind::UnclosedSingleQuote,
-                        self.start..self.source.len(),
-                    )),
-            ),
-            '"' => Some(
-                self.span_through_match('"')
-                    .map(|span| {
-                        self.current = span.end;
-                        let token = self.make_token_with_slice(
-                            TokenKind::DoubleQuoted,
-                            self.start + 1,
-                            self.current - 1,
-                        );
+        while let Some(ch) = parser.peek() {
+            match ch {
+                '|' => break,
+                w if w.is_whitespace() => break,
+                _ => {
+                    opt_parts.push(Part::parse_token(parser)?);
+                }
+            }
+        }
 
-                        token
-                    })
-                    .ok_or(self.error_with_span(
-                        ScanErrorKind::UnclosedDoubleQuote,
-                        self.start..self.source.len(),
-                    )),
-            ),
+        Ok(Self {
+            span: start..parser.pos,
+            part,
+            opt_parts,
+        })
+    }
+}
+
+pub struct Part<'a> {
+    kind: TokenPartKind,
+
+    span: Range<usize>,
+
+    pub lexme: &'a str,
+}
+
+impl<'a> ParseToken<'a> for Part<'a> {
+    fn parse_token(parser: &mut super::Parser<'a>) -> Result<Self, ParseError> {
+        match parser.peek().ok_or(ParseError::UnexpectedEof)? {
+            '|' => Err(ParseError::UnexpectedChar {
+                ch: '|',
+                reason: "`|` is the start of a pipe and cannot be part of a simple, unquoted arg"
+                    .to_string(),
+            }),
+            w if w.is_whitespace() => Err(ParseError::UnexpectedChar {
+                ch: w,
+                reason: "cannot have whitespace within a command".to_string(),
+            }),
+            '\'' => {
+                let start = parser.pos;
+                parser.bump();
+                parser.consume_until('\'').ok_or(ParseError::ExpectedChar {
+                    ch: '\'',
+                    reason: "expected closing quote".to_string(),
+                })?;
+                let end = parser.pos;
+                parser.bump();
+
+                Ok(Self {
+                    kind: TokenPartKind::SingleQuote,
+                    span: start..parser.pos,
+                    lexme: &parser.source[start + 1..end],
+                })
+            }
+            '"' => {
+                let start = parser.pos;
+                parser.bump();
+                parser.consume_until('"').ok_or(ParseError::ExpectedChar {
+                    ch: '"',
+                    reason: "expected closing quote".to_string(),
+                })?;
+                let end = parser.pos;
+                parser.bump();
+
+                Ok(Self {
+                    kind: TokenPartKind::SingleQuote,
+                    span: start..parser.pos,
+                    lexme: &parser.source[start + 1..end],
+                })
+            }
             _ => {
-                self.current = self
-                    .span_before_any_match(&[' ', '\'', '"', '|', '>'])
-                    .map_or(self.source.len(), |range| range.end);
+                let start = parser.pos;
+                let _ = parser.consume_while(|ch| {
+                    !ch.is_whitespace() && ch != '|' && ch != '"' && ch != '\''
+                });
 
-                Ok(())
+                Ok(Self {
+                    kind: TokenPartKind::Simple,
+                    span: start..parser.pos,
+                    lexme: &parser.source[start..parser.pos],
+                })
             }
         }
     }
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
+pub struct Command<'a> {
+    span: Range<usize>,
 
-    #[test]
-    pub fn span_through_match_includes_the_first_matching_character() {
-        let scanner = Scanner {
-            source: "1'2'3456'78",
-            start: 3,
-            current: 4,
-            had_name: false,
+    pub name: Part<'a>,
+
+    pub args: Vec<Arg<'a>>,
+}
+
+impl<'a> ParseToken<'a> for Command<'a> {
+    fn parse_token(parser: &mut super::Parser<'a>) -> Result<Self, ParseError> {
+        parser.skip_whitespace();
+
+        let start = parser.pos;
+
+        let name = Part::parse_token(parser)?;
+
+        let mut args = Vec::new();
+
+        let mut end = parser.pos;
+
+        while let Some(ch) = parser.peek() {
+            parser.skip_whitespace();
+
+            if ch == '|' {
+                break;
+            }
+
+            args.push(Arg::parse_token(parser)?);
+
+            end = parser.pos;
+        }
+
+        Ok(Self {
+            span: start..end,
+            name,
+            args,
+        })
+    }
+}
+
+pub struct Pipeline<'a> {
+    opt_commands: Vec<(Pipe<'a>, Command<'a>)>,
+
+    pub first_command: Command<'a>,
+}
+
+impl<'a> ParseToken<'a> for Pipeline<'a> {
+    fn parse_token(parser: &mut super::Parser<'a>) -> Result<Self, ParseError> {
+        let first_command = Command::parse_token(parser)?;
+
+        let mut opt_commands = Vec::new();
+
+        while parser.peek().is_some() {
+            let pipe = Pipe::parse_token(parser)?;
+            parser.skip_whitespace();
+            let cmd = Command::parse_token(parser)?;
+            parser.skip_whitespace();
+
+            opt_commands.push((pipe, cmd));
+        }
+
+        Ok(Self {
+            opt_commands,
+            first_command,
+        })
+    }
+}
+
+pub struct Location<'a> {
+    span: Range<usize>,
+
+    location: LocationPart<'a>,
+
+    opt_location: Option<LocationPart<'a>>,
+}
+
+impl<'a> ParseToken<'a> for Location<'a> {
+    fn parse_token(parser: &mut super::Parser<'a>) -> Result<Self, ParseError> {
+        let start = parser.pos;
+
+        let location = LocationPart::parse_token(parser)?;
+        parser.skip_whitespace();
+
+        let opt_location = match parser.peek() {
+            Some('@') => {
+                parser.bump();
+                parser.skip_whitespace();
+                Some(LocationPart::parse_token(parser)?)
+            }
+            Some('>') => {
+                parser.bump();
+                None
+            }
+            Some(ch) => {
+                return Err(ParseError::UnexpectedChar {
+                    ch,
+                    reason: "the first location must have a `>` after it or indicate a second location with `@`".to_string(),
+                });
+            }
+            None => return Err(ParseError::UnexpectedEof),
         };
 
-        let span = scanner.span_through_match('\'').unwrap();
-
-        assert_eq!(3..9, span);
-        assert_eq!("'3456'", &scanner.source[span]);
+        Ok(Self {
+            span: start..parser.pos,
+            location,
+            opt_location,
+        })
     }
+}
 
-    #[test]
-    pub fn span_through_match_includes_a_match_at_current() {
-        let scanner = Scanner {
-            source: "''",
-            start: 0,
-            current: 1,
-            had_name: false,
-        };
+pub struct LocationPart<'a> {
+    span: Range<usize>,
 
-        assert_eq!(Some(0..2), scanner.span_through_match('\''));
+    kind: TokenPartKind,
+
+    pub lexme: &'a str,
+}
+
+impl<'a> ParseToken<'a> for LocationPart<'a> {
+    fn parse_token(parser: &mut super::Parser<'a>) -> Result<Self, ParseError> {
+        let start = parser.pos;
+
+        match parser.bump().ok_or(ParseError::UnexpectedEof)? {
+            '\'' => {
+                let range = parser.consume_until('\'').ok_or(ParseError::ExpectedChar {
+                    ch: '\'',
+                    reason: "Location part requires closing '".to_string(),
+                })?;
+
+                if range.is_empty() {
+                    return Err(ParseError::EmptyRange);
+                }
+
+                Ok(LocationPart {
+                    kind: TokenPartKind::SingleQuote,
+                    lexme: &parser.source[range.clone()],
+                    span: range,
+                })
+            }
+            '"' => {
+                let range = parser.consume_until('"').ok_or(ParseError::ExpectedChar {
+                    ch: '"',
+                    reason: "Location part requires closing \"".to_string(),
+                })?;
+
+                if range.is_empty() {
+                    return Err(ParseError::EmptyRange);
+                }
+
+                Ok(LocationPart {
+                    kind: TokenPartKind::DoubleQuote,
+                    lexme: &parser.source[range.clone()],
+                    span: range,
+                })
+            }
+            _ => {
+                let mut end = parser.pos;
+
+                while let Some(ch) = parser.peek() {
+                    if ch.is_whitespace() || ch == '@' || ch == '>' {
+                        break;
+                    }
+
+                    parser.bump();
+                    end = parser.pos;
+                }
+
+                let range = start..end;
+
+                if range.is_empty() {
+                    return Err(ParseError::EmptyRange);
+                }
+
+                Ok(LocationPart {
+                    kind: TokenPartKind::Simple,
+                    lexme: &parser.source[range.clone()],
+                    span: range,
+                })
+            }
+        }
     }
+}
 
-    #[test]
-    pub fn span_through_match_returns_none_if_no_match_follows_current() {
-        let scanner = Scanner {
-            source: "'a'",
-            start: 0,
-            current: 3,
-            had_name: false,
-        };
+fn get_source_span(source: &str, range: Range<usize>) -> Result<&str, ParseError> {
+    let part = source
+        .get(range.clone())
+        .ok_or(ParseError::RangeOutOfBounds {
+            range: range.clone(),
+            bounds: 0..source.len(),
+        })?;
 
-        assert_eq!(None, scanner.span_through_match('\''));
-    }
+    if part.is_empty() {
+        return Err(ParseError::EmptyRange);
+    };
 
-    #[test]
-    pub fn span_through_match_uses_utf8_byte_offsets() {
-        let scanner = Scanner {
-            source: "'猫🐈 tail",
-            start: 0,
-            current: 1,
-            had_name: false,
-        };
-
-        let span = scanner.span_through_match('🐈').unwrap();
-
-        assert_eq!(0..8, span);
-        assert_eq!("'猫🐈", &scanner.source[span]);
-    }
-
-    #[test]
-    pub fn span_before_any_match_excludes_the_first_matching_character() {
-        let scanner = Scanner {
-            source: "word | next",
-            start: 0,
-            current: 1,
-            had_name: false,
-        };
-
-        let span = scanner.span_before_any_match(&['|', ' ']).unwrap();
-
-        assert_eq!(0..4, span);
-        assert_eq!("word", &scanner.source[span]);
-    }
-
-    #[test]
-    pub fn span_before_any_match_returns_empty_span_when_match_is_at_current() {
-        let scanner = Scanner {
-            source: "|next",
-            start: 0,
-            current: 0,
-            had_name: false,
-        };
-
-        assert_eq!(Some(0..0), scanner.span_before_any_match(&['|', ' ']));
-    }
-
-    #[test]
-    pub fn span_before_any_match_returns_none_when_no_match_follows_current() {
-        let scanner = Scanner {
-            source: "word",
-            start: 0,
-            current: 1,
-            had_name: false,
-        };
-
-        assert_eq!(None, scanner.span_before_any_match(&['|', ' ']));
-    }
-
-    #[test]
-    pub fn span_before_any_match_uses_utf8_byte_offsets() {
-        let scanner = Scanner {
-            source: "猫🐈|next",
-            start: 0,
-            current: 0,
-            had_name: false,
-        };
-
-        let span = scanner.span_before_any_match(&['|', ' ']).unwrap();
-
-        assert_eq!(0..7, span);
-        assert_eq!("猫🐈", &scanner.source[span]);
-    }
+    Ok(part)
 }

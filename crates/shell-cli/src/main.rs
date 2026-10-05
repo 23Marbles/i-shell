@@ -2,7 +2,8 @@ use std::process::ExitCode;
 
 use rustyline::{Editor, error::ReadlineError};
 use shell_core::{
-    command::{CommandResult, Pipeline, context::CommandContext},
+    command::{Command, CommandResult, context::CommandContext},
+    parse::Parser,
     shell::Shell,
 };
 
@@ -49,10 +50,19 @@ async fn main() -> Result<ExitCode, ReadlineError> {
             Err(e) => return Err(e),
         };
 
-        let cmd = match Pipeline::parse(&line) {
-            Some(res) => res.unwrap().cmd,
-            None => continue,
+        let mut parser = Parser::new(&line);
+
+        let pipeline = match parser.parse() {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("{e}");
+                continue;
+            }
         };
+
+        let cmd = pipeline.first_command;
+
+        let cmd = Command::from_empheral(cmd);
 
         let cmd = match cmd.resolve(&shell_handle).await {
             Ok(c) => c,

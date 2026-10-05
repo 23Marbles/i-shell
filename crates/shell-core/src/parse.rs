@@ -1,65 +1,90 @@
-use std::{
-    collections::VecDeque,
-    fmt::{Display, Write},
-};
-
-use crate::command::{Args, Command, chain::ChainedCommand};
-
 pub mod token;
 
+use std::ops::Range;
+
+use crate::parse::token::Pipeline;
+
 #[derive(Debug, thiserror::Error)]
-pub enum ParseErr {}
+pub enum ParseError {
+    #[error("the range specified was empty")]
+    EmptyRange,
 
-//pub struct Parser<'a> {
-//    remaining: &'a str,
-//    tokens: Vec<Token<'a>>,
-//}
+    #[error("did not expect char '{ch}': {reason}")]
+    UnexpectedChar { ch: char, reason: String },
 
-#[derive(Default)]
-pub struct ParseState {
-    pub q_single: bool,
-    pub q_double: bool,
+    #[error("expected char '{ch}': {reason}")]
+    ExpectedChar { ch: char, reason: String },
+
+    #[error("the range indexed (`{}..{}`) is out of bounds (bounds: `{}..{}`)", range.start, range.end, bounds.start, bounds.end)]
+    RangeOutOfBounds {
+        range: Range<usize>,
+
+        bounds: Range<usize>,
+    },
+
+    #[error("attemted to parse past the end of the line")]
+    UnexpectedEof,
 }
 
-/*impl Parser<'_> {
-    pub fn next_token(&self) -> Result<Option<Token>, ParseErr> {
-        if self.remaining.is_empty() {
-            return Ok(None);
-        };
+pub struct Parser<'a> {
+    pos: usize,
 
-        let mut buf = String::new();
+    source: &'a str,
+}
 
-        Ok(())
+impl<'a> Parser<'a> {
+    fn peek(&self) -> Option<char> {
+        self.source[self.pos..].chars().next()
     }
-    /* pub fn parse(s: &str) -> Option<Result<ChainedCommand, PipelineParseErr>> {
-        let mut state = ParseState::default();
 
-        let mut args = VecDeque::new();
+    fn bump(&mut self) -> Option<char> {
+        let ch = self.peek()?;
+        self.pos += ch.len_utf8();
+        Some(ch)
+    }
 
-        let mut current_buf = String::new();
+    #[must_use]
+    fn consume_while(&mut self, mut predicate: impl FnMut(char) -> bool) -> Range<usize> {
+        let start = self.pos;
 
-        for ch in s.chars() {
-            match ch {
-                '"' if state.double || !state.single => state.double ^= true,
-                '\'' if state.single || !state.double => state.single ^= true,
-                ' ' if !state.double && !state.single => {
-                    args.push_back(current_buf);
-                    current_buf = String::new();
-                }
-                ch => current_buf.push(ch),
+        while let Some(ch) = self.peek() {
+            if !predicate(ch) {
+                break;
             }
+
+            self.bump();
         }
 
-        args.push_back(current_buf);
+        start..self.pos
+    }
 
-        Some(Ok(Self {
-            cmd: Command {
-                name: args.pop_front()?,
-                args: Args {
-                    values: args.into_iter().collect(),
-                },
-            },
-        }))
-    } */
+    fn skip_whitespace(&mut self) {
+        while self.peek().is_some_and(char::is_whitespace) {
+            self.bump();
+        }
+    }
+
+    #[must_use]
+    fn consume_until(&mut self, ch: char) -> Option<Range<usize>> {
+        let start = self.pos;
+        let end = self.source[start..].find(ch)? + start;
+
+        self.pos = end + ch.len_utf8();
+
+        Some(start..end)
+    }
 }
-*/
+
+impl<'a> Parser<'a> {
+    pub fn new(source: &'a str) -> Self {
+        Self { pos: 0, source }
+    }
+
+    pub fn parse(&mut self) -> Result<Pipeline<'a>, ParseError> {
+        Pipeline::parse_token(self)
+    }
+}
+
+pub trait ParseToken<'a>: Sized {
+    fn parse_token(parser: &mut Parser<'a>) -> Result<Self, ParseError>;
+}
