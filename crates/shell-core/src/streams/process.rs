@@ -9,17 +9,17 @@ pub struct Stdin {
     inner: tokio::io::Stdin,
 }
 
-impl Default for Stdin {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Stdin {
     pub fn new() -> Self {
         Self {
             inner: tokio::io::stdin(),
         }
+    }
+}
+
+impl Default for Stdin {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -33,17 +33,17 @@ pub struct Stderr {
     inner: tokio::io::Stderr,
 }
 
-impl Default for Stderr {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Stderr {
     pub fn new() -> Self {
         Self {
             inner: tokio::io::stderr(),
         }
+    }
+}
+
+impl Default for Stderr {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -65,17 +65,17 @@ pub struct Stdout {
     inner: tokio::io::Stdout,
 }
 
-impl Default for Stdout {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Stdout {
     pub fn new() -> Self {
         Self {
             inner: tokio::io::stdout(),
         }
+    }
+}
+
+impl Default for Stdout {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

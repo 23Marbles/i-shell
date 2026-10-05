@@ -178,7 +178,7 @@ builtin_list!(
         } else {
             let curr_path = ctx.current_dir().await;
 
-            
+
 
             btry!(curr_path.join(join_path).canonicalize())
         };
