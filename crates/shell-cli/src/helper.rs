@@ -21,6 +21,7 @@ impl Highlighter for LineHelper {
         let mut is_first = true;
         let mut q_single = false;
         let mut q_double = false;
+        let mut optional_arg = false;
 
         let mut buf = "\x1b[33m".to_string();
 
@@ -46,9 +47,14 @@ impl Highlighter for LineHelper {
                         q_single = true
                     }
                 }
-                ' ' if !q_double && !q_single && is_first => {
+                '-' if !q_double && !q_single && !is_first => {
+                    optional_arg = true;
+                    buf.push_str("\x1b[2m");
+                }
+                ' ' if !q_double && !q_single && (is_first || optional_arg) => {
                     buf.push_str("\x1b[0m");
-                    is_first = false
+                    is_first = false;
+                    optional_arg = false;
                 }
                 _ => (),
             };
