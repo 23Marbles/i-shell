@@ -74,6 +74,23 @@ impl<'a> Parser<'a> {
             self.bump();
         }
     }
+
+    fn has_location_terminator(&self) -> bool {
+        let mut quote = None;
+
+        for ch in self.source[self.pos..].chars() {
+            match (quote, ch) {
+                (Some(current), ch) if current == ch => quote = None,
+                (Some(_), _) => {}
+                (None, '\'' | '"') => quote = Some(ch),
+                (None, '>') => return true,
+                (None, '|') => return false,
+                (None, _) => {}
+            }
+        }
+
+        false
+    }
 }
 
 impl<'a> Parser<'a> {

@@ -3,7 +3,19 @@ mod display_impls {
 
     impl Display for LocationPart<'_> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str(self.lexme)
+            match self.kind {
+                TokenPartKind::SingleQuote => {
+                    f.write_char('\'')?;
+                    f.write_str(self.lexme)?;
+                    f.write_char('\'')
+                }
+                TokenPartKind::DoubleQuote => {
+                    f.write_char('"')?;
+                    f.write_str(self.lexme)?;
+                    f.write_char('"')
+                }
+                TokenPartKind::Simple => f.write_str(self.lexme),
+            }
         }
     }
 
@@ -178,27 +190,17 @@ impl<'a> ParseToken<'a> for Pipe<'a> {
             });
         }
 
-        let loc_res = Location::parse_token(parser);
-
-        if parser.bump().ok_or(ParseError::UnexpectedEof)? == '>' {
-            Ok(Self {
-                span: start..parser.pos,
-                location: Some(loc_res?),
-            })
+        parser.skip_whitespace();
+        let location = if parser.has_location_terminator() {
+            Some(Location::parse_token(parser)?)
         } else {
-            parser.pos = start;
+            None
+        };
 
-            parser.skip_whitespace();
-
-            if parser.peek() == Some('>') {
-                parser.bump();
-            }
-
-            Ok(Self {
-                span: start..parser.pos,
-                location: None,
-            })
-        }
+        Ok(Self {
+            span: start..parser.pos,
+            location,
+        })
     }
 }
 
@@ -225,33 +227,29 @@ impl<'a> ParseToken<'a> for Part<'a> {
             '\'' => {
                 let start = parser.pos;
                 parser.bump();
-                parser.consume_until('\'').ok_or(ParseError::ExpectedChar {
+                let content = parser.consume_until('\'').ok_or(ParseError::ExpectedChar {
                     ch: '\'',
                     reason: "expected closing quote".to_string(),
                 })?;
-                let end = parser.pos;
-                parser.bump();
 
                 Ok(Self {
                     kind: TokenPartKind::SingleQuote,
                     span: start..parser.pos,
-                    lexme: &parser.source[start + 1..end],
+                    lexme: &parser.source[content],
                 })
             }
             '"' => {
                 let start = parser.pos;
                 parser.bump();
-                parser.consume_until('"').ok_or(ParseError::ExpectedChar {
+                let content = parser.consume_until('"').ok_or(ParseError::ExpectedChar {
                     ch: '"',
                     reason: "expected closing quote".to_string(),
                 })?;
-                let end = parser.pos;
-                parser.bump();
 
                 Ok(Self {
-                    kind: TokenPartKind::SingleQuote,
+                    kind: TokenPartKind::DoubleQuote,
                     span: start..parser.pos,
-                    lexme: &parser.source[start + 1..end],
+                    lexme: &parser.source[content],
                 })
             }
             _ => {
@@ -288,22 +286,17 @@ impl<'a> ParseToken<'a> for Command<'a> {
 
         let mut args = Vec::new();
 
-        let mut end = parser.pos;
-
-        while let Some(ch) = parser.peek() {
+        loop {
             parser.skip_whitespace();
 
-            if ch == '|' {
-                break;
+            match parser.peek() {
+                None | Some('|') => break,
+                Some(_) => args.push(Arg::parse_token(parser)?),
             }
-
-            args.push(Arg::parse_token(parser)?);
-
-            end = parser.pos;
         }
 
         Ok(Self {
-            span: start..end,
+            span: start..parser.pos,
             name,
             args,
         })
@@ -322,11 +315,16 @@ impl<'a> ParseToken<'a> for Pipeline<'a> {
 
         let mut opt_commands = Vec::new();
 
-        while parser.peek().is_some() {
+        loop {
+            parser.skip_whitespace();
+
+            if parser.peek().is_none() {
+                break;
+            }
+
             let pipe = Pipe::parse_token(parser)?;
             parser.skip_whitespace();
             let cmd = Command::parse_token(parser)?;
-            parser.skip_whitespace();
 
             opt_commands.push((pipe, cmd));
         }
@@ -359,10 +357,7 @@ impl<'a> ParseToken<'a> for Location<'a> {
                 parser.skip_whitespace();
                 Some(LocationPart::parse_token(parser)?)
             }
-            Some('>') => {
-                parser.bump();
-                None
-            }
+            Some('>') => None,
             Some(ch) => {
                 return Err(ParseError::UnexpectedChar {
                     ch,
@@ -371,6 +366,14 @@ impl<'a> ParseToken<'a> for Location<'a> {
             }
             None => return Err(ParseError::UnexpectedEof),
         };
+
+        parser.skip_whitespace();
+        if parser.bump() != Some('>') {
+            return Err(ParseError::ExpectedChar {
+                ch: '>',
+                reason: "locations must end with a `>` to indicate the command follows".to_string(),
+            });
+        }
 
         Ok(Self {
             span: start..parser.pos,
@@ -406,7 +409,7 @@ impl<'a> ParseToken<'a> for LocationPart<'a> {
                 Ok(LocationPart {
                     kind: TokenPartKind::SingleQuote,
                     lexme: &parser.source[range.clone()],
-                    span: range,
+                    span: start..parser.pos,
                 })
             }
             '"' => {
@@ -422,10 +425,17 @@ impl<'a> ParseToken<'a> for LocationPart<'a> {
                 Ok(LocationPart {
                     kind: TokenPartKind::DoubleQuote,
                     lexme: &parser.source[range.clone()],
-                    span: range,
+                    span: start..parser.pos,
                 })
             }
-            _ => {
+            first => {
+                if first.is_whitespace() || matches!(first, '@' | '>') {
+                    return Err(ParseError::UnexpectedChar {
+                        ch: first,
+                        reason: "expected a path or IP location part".to_string(),
+                    });
+                }
+
                 let mut end = parser.pos;
 
                 while let Some(ch) = parser.peek() {
@@ -439,10 +449,6 @@ impl<'a> ParseToken<'a> for LocationPart<'a> {
 
                 let range = start..end;
 
-                if range.is_empty() {
-                    return Err(ParseError::EmptyRange);
-                }
-
                 Ok(LocationPart {
                     kind: TokenPartKind::Simple,
                     lexme: &parser.source[range.clone()],
@@ -450,5 +456,170 @@ impl<'a> ParseToken<'a> for LocationPart<'a> {
                 })
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parse::Parser;
+
+    #[test]
+    fn parses_command_and_trailing_whitespace() {
+        let mut parser = Parser::new("echo hello  \t");
+        let pipeline = parser.parse().unwrap();
+
+        assert_eq!(pipeline.first_command.name.lexme, "echo");
+        assert_eq!(pipeline.first_command.args.len(), 1);
+        assert_eq!(pipeline.first_command.args[0].raw_to_string(), "hello");
+        assert_eq!(pipeline.to_string(), "echo hello");
+    }
+
+    #[test]
+    fn parses_quoted_and_concatenated_argument_parts() {
+        let mut parser = Parser::new("echo 'two words' pre\"猫\"");
+        let pipeline = parser.parse().unwrap();
+
+        let args = &pipeline.first_command.args;
+        assert_eq!(args[0].raw_to_string(), "two words");
+        assert_eq!(args[1].raw_to_string(), "pre猫");
+        assert_eq!(args[1].part.kind, TokenPartKind::Simple);
+        assert_eq!(args[1].opt_parts[0].kind, TokenPartKind::DoubleQuote);
+    }
+
+    #[test]
+    fn parses_pipeline_without_location() {
+        let mut parser = Parser::new("echo one | cat two");
+        let pipeline = parser.parse().unwrap();
+
+        assert_eq!(pipeline.opt_commands.len(), 1);
+        assert_eq!(pipeline.opt_commands[0].1.name.lexme, "cat");
+        assert_eq!(pipeline.to_string(), "echo one | cat two");
+    }
+
+    #[test]
+    fn parses_three_command_pipeline_in_order() {
+        let mut parser = Parser::new("echo first | tr a-z A-Z | wc -c");
+        let pipeline = parser.parse().unwrap();
+
+        assert_eq!(pipeline.first_command.name.lexme, "echo");
+        assert_eq!(
+            pipeline
+                .first_command
+                .args
+                .iter()
+                .map(Arg::raw_to_string)
+                .collect::<Vec<_>>(),
+            ["first"]
+        );
+        assert_eq!(pipeline.opt_commands.len(), 2);
+        assert_eq!(pipeline.opt_commands[0].1.name.lexme, "tr");
+        assert_eq!(
+            pipeline.opt_commands[0]
+                .1
+                .args
+                .iter()
+                .map(Arg::raw_to_string)
+                .collect::<Vec<_>>(),
+            ["a-z", "A-Z"]
+        );
+        assert_eq!(pipeline.opt_commands[1].1.name.lexme, "wc");
+        assert_eq!(
+            pipeline.opt_commands[1]
+                .1
+                .args
+                .iter()
+                .map(Arg::raw_to_string)
+                .collect::<Vec<_>>(),
+            ["-c"]
+        );
+        assert_eq!(pipeline.to_string(), "echo first | tr a-z A-Z | wc -c");
+    }
+
+    #[test]
+    fn parses_three_command_pipeline_with_middle_remote_location() {
+        let mut parser = Parser::new("one |/tmp@host> two | three");
+        let pipeline = parser.parse().unwrap();
+
+        assert_eq!(pipeline.opt_commands.len(), 2);
+
+        let (located_pipe, second_command) = &pipeline.opt_commands[0];
+        let location = located_pipe.location.as_ref().unwrap();
+        assert_eq!(location.location.lexme, "/tmp");
+        assert_eq!(location.opt_location.as_ref().unwrap().lexme, "host");
+        assert_eq!(second_command.name.lexme, "two");
+
+        let (plain_pipe, third_command) = &pipeline.opt_commands[1];
+        assert!(plain_pipe.location.is_none());
+        assert_eq!(third_command.name.lexme, "three");
+        assert_eq!(pipeline.to_string(), "one |/tmp@host> two | three");
+    }
+
+    #[test]
+    fn parses_three_command_pipeline_with_quoted_locations_and_spacing() {
+        let mut parser = Parser::new("one  | 'first path' > two\t|\"second path\"> three");
+        let pipeline = parser.parse().unwrap();
+
+        assert_eq!(pipeline.opt_commands.len(), 2);
+        assert_eq!(
+            pipeline.opt_commands[0]
+                .0
+                .location
+                .as_ref()
+                .unwrap()
+                .location
+                .lexme,
+            "first path"
+        );
+        assert_eq!(
+            pipeline.opt_commands[1]
+                .0
+                .location
+                .as_ref()
+                .unwrap()
+                .location
+                .lexme,
+            "second path"
+        );
+        assert_eq!(pipeline.opt_commands[0].1.name.lexme, "two");
+        assert_eq!(pipeline.opt_commands[1].1.name.lexme, "three");
+        assert_eq!(
+            pipeline.to_string(),
+            "one |'first path'> two |\"second path\"> three"
+        );
+    }
+
+    #[test]
+    fn parses_pipeline_with_quoted_location_and_ip() {
+        let mut parser = Parser::new("echo |'path with spaces'@host> cat");
+        let pipeline = parser.parse().unwrap();
+
+        let (pipe, command) = &pipeline.opt_commands[0];
+        let location = pipe.location.as_ref().unwrap();
+        assert_eq!(location.location.lexme, "path with spaces");
+        assert_eq!(location.location.kind, TokenPartKind::SingleQuote);
+        assert_eq!(location.opt_location.as_ref().unwrap().lexme, "host");
+        assert_eq!(command.name.lexme, "cat");
+        assert_eq!(pipeline.to_string(), "echo |'path with spaces'@host> cat");
+    }
+
+    #[test]
+    fn reports_unterminated_quoted_argument() {
+        let mut parser = Parser::new("echo 'unfinished");
+
+        assert!(matches!(
+            parser.parse(),
+            Err(ParseError::ExpectedChar { ch: '\'', .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_location_without_terminating_greater_than() {
+        let mut parser = Parser::new("/tmp@host cat");
+
+        assert!(matches!(
+            Location::parse_token(&mut parser),
+            Err(ParseError::ExpectedChar { ch: '>', .. })
+        ));
     }
 }
