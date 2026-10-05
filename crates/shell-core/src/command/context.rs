@@ -13,6 +13,8 @@ pub struct CommandContext {
 
     pub stderr: Option<StreamTx>,
 
+    pub opt_path: Option<PathBuf>,
+
     shell_handle: ShellHandle,
 }
 
@@ -23,7 +25,14 @@ impl CommandContext {
             stdin: None,
             stdout: None,
             stderr: None,
+            opt_path: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_path(mut self, path: PathBuf) -> Self {
+        self.opt_path = Some(path);
+        self
     }
 
     #[must_use]
@@ -97,9 +106,18 @@ impl CommandContext {
         Some(self.stdin.as_mut()?.recv().await)
     }
 
-    #[inline(always)]
     pub async fn current_dir(&self) -> PathBuf {
-        self.shell_handle.handle.read().await.cwd.clone()
+        self.opt_path
+            .as_ref()
+            .unwrap_or(&self.shell_handle.handle.read().await.cwd)
+            .clone()
+    }
+
+    pub async fn set_current_dir(&mut self, new_path: PathBuf) {
+        match &mut self.opt_path {
+            Some(path) => *path = new_path,
+            None => self.shell_mut(|shell| shell.cwd = new_path).await,
+        }
     }
 
     pub async fn send_stdout(&mut self, v: Vec<u8>) -> Option<Result<(), StreamSendError>> {

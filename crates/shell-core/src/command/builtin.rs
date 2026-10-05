@@ -178,12 +178,10 @@ builtin_list!(
         } else {
             let curr_path = ctx.current_dir().await;
 
-
-
             btry!(curr_path.join(join_path).canonicalize())
         };
 
-        let _ = ctx.shell_mut(|mut shell| shell.cwd = new_path).await;
+        ctx.set_current_dir(new_path).await;
 
         Ok(CommandResult::Continue)
     }
