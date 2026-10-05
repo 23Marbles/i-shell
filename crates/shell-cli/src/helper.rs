@@ -1,21 +1,79 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, path::PathBuf};
 
 use rustyline::{
-    Helper,
-    completion::{self, Completer},
-    highlight::Highlighter,
-    hint::Hinter,
-    validate::Validator,
+    Context, Helper, completion::{Completer, Pair}, highlight::Highlighter, hint::Hinter, validate::Validator,
 };
+use shell_core::command::builtin::BUILTINS;
 
 pub struct LineHelper {}
 
 impl Hinter for LineHelper {
     type Hint = String;
 }
+
 impl Completer for LineHelper {
-    type Candidate = completion::Pair;
+    type Candidate = Pair;
+
+    fn complete(
+        &self,
+        line: &str,
+        pos: usize,
+        _ctx: &Context<'_>,
+    ) -> rustyline::Result<(usize, Vec<Pair>)> {
+        // Only complete the text before the cursor.
+        let input = &line[..pos];
+
+        // Find the beginning of the current word.
+        let start = input
+            .rfind(char::is_whitespace)
+            .unwrap_or(0);
+
+        if start != 0 {
+            return Ok((0, Vec::new()));
+        }
+
+        let partial = &input[start..];
+
+        let commands = BUILTINS;
+
+        let path_env = std::env::var("PATH").unwrap_or_default();
+
+        let dir_entries = path_env
+            .split([';', ':'])
+            .filter_map(|s| {
+                let path = PathBuf::from(s);
+
+                (path.exists() && path.is_dir())
+                    .then_some(std::fs::read_dir(path).ok()?.filter_map(Result::ok))
+            })
+            .flatten();
+
+        let programs = dir_entries.filter_map(|entry| {
+            Some(Cow::Owned(
+                entry
+                    .path()
+                    .file_name()
+                    .map(|o| o.to_owned().into_string().ok())??,
+            ))
+        });
+
+        let mut candidates: Vec<Pair> = commands
+            .iter()
+            .map(|command| Cow::Borrowed(command.name))
+            .chain(programs)
+            .filter(|name| name.starts_with(partial))
+            .map(|command| Pair {
+                display: command.to_string(),
+                replacement: format!("{command} "),
+            })
+            .collect();
+
+        candidates.dedup_by(|p1, p2| p1.display == p2.display);
+
+        Ok((start, candidates))
+    }
 }
+
 impl Highlighter for LineHelper {
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
         let mut is_first = true;
