@@ -298,14 +298,25 @@ impl<'a> ParseToken<'a> for Part<'a> {
             }
             _ => {
                 let start = parser.pos;
-                let _ = parser.consume_while(|ch| {
-                    !ch.is_whitespace() && ch != '|' && ch != '"' && ch != '\''
-                });
+                let mut end = parser.pos;
+
+                while let Some(ch) = parser.peek() {
+                    if ch.is_whitespace()
+                        || matches!(ch, '@' | ':' | '[' | ']' | '|')
+                    {
+                        break;
+                    }
+
+                    parser.bump();
+                    end = parser.pos;
+                }
+
+                let range = start..end;
 
                 Ok(Self {
                     kind: TokenPartKind::Simple,
-                    span: start..parser.pos,
-                    lexme: &parser.source[start..parser.pos],
+                    span: range.clone(),
+                    lexme: &parser.source[range],
                 })
             }
         }
@@ -418,7 +429,7 @@ impl<'a> ParseToken<'a> for CommandChain<'a> {
                 _ => {
                     return Err(ParseError::ExpectedChar {
                         ch: '|',
-                        reason: "commands must have a pipe or other terminating charcater following them".to_string(),
+                        reason: "commands must have a pipe or other terminating character following them".to_string(),
                     });
                 }
             }
@@ -463,12 +474,10 @@ impl<'a> ParseToken<'a> for Location<'a> {
             None => return Err(ParseError::UnexpectedEof),
         };
 
-        if parser.peek() != Some(':') {
-            return Err(ParseError::ExpectedChar {
-                ch: ':',
-                reason: "locations must end with a `:` to indicate the command follows".to_string(),
-            });
-        }
+        parser.expect(
+            ':',
+            "locations must end with a `:` to indicate the command follows".to_string(),
+        )?;
 
         Ok(Self {
             span: start..parser.pos,
@@ -534,7 +543,7 @@ impl<'a> ParseToken<'a> for LocationPart<'a> {
                 let mut end = parser.pos;
 
                 while let Some(ch) = parser.peek() {
-                    if ch.is_whitespace() || ch == '@' || ch == ':' {
+                    if ch.is_whitespace() || matches!(ch, '@' | ':' | '[' | ']' | '|') {
                         break;
                     }
 
@@ -562,6 +571,45 @@ pub struct LocatedChain<'a> {
     location: Location<'a>,
 }
 
+#[cfg(test)]
+mod tests {
+    use crate::parse::token::CommandChain;
+    use crate::parse::{ParseToken, Parser};
+
+    #[test]
+    fn parses_simple_command_with_quoted_args() {
+        let mut parser = Parser::new("echo \"hello world\" | grep -i 'there'");
+
+        let pipeline = parser.parse().unwrap();
+
+        assert_eq!(parser.pos, "echo \"hello world\" | grep -i 'there'".len());
+        assert_eq!(
+            pipeline.first_chain.to_string(),
+            "echo \"hello world\" | grep -i 'there'"
+        );
+    }
+
+    #[test]
+    fn command_chain_stops_before_closing_bracket() {
+        let mut parser = Parser::new("echo hello]");
+
+        let chain = CommandChain::parse_token(&mut parser).unwrap();
+
+        assert_eq!(chain.first_command.to_string(), "echo hello");
+        assert_eq!(parser.peek(), Some(']'));
+    }
+
+    #[test]
+    fn parses_located_chain_and_consumes_the_delimiter() {
+        let mut parser = Parser::new("[127.0.0.1: echo hello]");
+
+        let pipeline = parser.parse().unwrap();
+
+        assert_eq!(parser.pos, "[127.0.0.1: echo hello]".len());
+        assert_eq!(pipeline.first_chain.to_string(), "[127.0.0.1:echo hello]");
+    }
+}
+
 impl<'a> ParseToken<'a> for LocatedChain<'a> {
     fn parse_token(parser: &mut super::Parser<'a>) -> Result<Self, ParseError> {
         let start = parser.pos;
@@ -574,10 +622,6 @@ impl<'a> ParseToken<'a> for LocatedChain<'a> {
         parser.skip_whitespace();
 
         let location = Location::parse_token(parser)?;
-
-        parser.skip_whitespace();
-
-        parser.expect(':', "Expected ':' after location".to_string())?;
 
         parser.skip_whitespace();
 

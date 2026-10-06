@@ -15,7 +15,7 @@ pub enum ParseError {
     #[error("expected char '{ch}': {reason}")]
     ExpectedChar { ch: char, reason: String },
 
-    #[error("attemted to parse past the end of the line")]
+    #[error("attempted to parse past the end of the line")]
     UnexpectedEof,
     #[error("did not expect char '{ch}': {reason}")]
     UnexpectedChar { ch: char, reason: String },
