@@ -17,6 +17,7 @@ This uses a very simple grammar to parse commands and construct pipes.
 ## Location
 
 ![Railroad grammar](location-grammar-railroad.svg)
+![Railroad grammar](located-command-grammar-railroad.svg)
 
 The location is where the command will be executed. It can be a directory and/or Ip. If it is an Ip
 a connection will attempt to be established if there does not already exist one.

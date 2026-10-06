@@ -28,6 +28,7 @@ pub enum ParseError {
     },
 }
 
+#[derive(Debug, Clone)]
 pub struct Parser<'a> {
     pos: usize,
 
@@ -35,14 +36,24 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    fn peek(&self) -> Option<char> {
-        self.source[self.pos..].chars().next()
-    }
-
     fn bump(&mut self) -> Option<char> {
         let ch = self.peek()?;
         self.pos += ch.len_utf8();
         Some(ch)
+    }
+
+    fn expect(&mut self, ch: char, reason: String) -> Result<(), ParseError> {
+        (self.bump().ok_or(ParseError::UnexpectedEof)? == ch)
+            .ok_or(ParseError::ExpectedChar { ch, reason })
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.source[self.pos..].chars().next()
+    }
+    fn peek_past_whitspace(&self) -> Option<char> {
+        let mut clone = self.clone();
+        clone.skip_whitespace();
+        clone.peek()
     }
 
     #[must_use]
@@ -73,23 +84,6 @@ impl<'a> Parser<'a> {
         while self.peek().is_some_and(char::is_whitespace) {
             self.bump();
         }
-    }
-
-    fn has_location_terminator(&self) -> bool {
-        let mut quote = None;
-
-        for ch in self.source[self.pos..].chars() {
-            match (quote, ch) {
-                (Some(current), ch) if current == ch => quote = None,
-                (Some(_), _) => {}
-                (None, '\'' | '"') => quote = Some(ch),
-                (None, '>') => return true,
-                (None, '|') => return false,
-                (None, _) => {}
-            }
-        }
-
-        false
     }
 }
 
