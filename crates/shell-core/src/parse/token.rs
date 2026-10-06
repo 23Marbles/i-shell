@@ -571,6 +571,34 @@ pub struct LocatedChain<'a> {
     location: Location<'a>,
 }
 
+impl<'a> ParseToken<'a> for LocatedChain<'a> {
+    fn parse_token(parser: &mut super::Parser<'a>) -> Result<Self, ParseError> {
+        let start = parser.pos;
+
+        parser.expect(
+            '[',
+            "Expected '[' at the start of located chain".to_string(),
+        )?;
+
+        parser.skip_whitespace();
+
+        let location = Location::parse_token(parser)?;
+
+        parser.skip_whitespace();
+
+        let chain = CommandChain::parse_token(parser)?;
+
+        parser.skip_whitespace();
+
+        parser.expect(']', "Expected ']' at the end of located chain".to_string())?;
+
+        Ok(Self {
+            span: start..parser.pos,
+            location,
+            chain,
+        })
+    }
+}
 #[cfg(test)]
 mod tests {
     use crate::parse::token::CommandChain;
@@ -607,34 +635,5 @@ mod tests {
 
         assert_eq!(parser.pos, "[127.0.0.1: echo hello]".len());
         assert_eq!(pipeline.first_chain.to_string(), "[127.0.0.1:echo hello]");
-    }
-}
-
-impl<'a> ParseToken<'a> for LocatedChain<'a> {
-    fn parse_token(parser: &mut super::Parser<'a>) -> Result<Self, ParseError> {
-        let start = parser.pos;
-
-        parser.expect(
-            '[',
-            "Expected '[' at the start of located chain".to_string(),
-        )?;
-
-        parser.skip_whitespace();
-
-        let location = Location::parse_token(parser)?;
-
-        parser.skip_whitespace();
-
-        let chain = CommandChain::parse_token(parser)?;
-
-        parser.skip_whitespace();
-
-        parser.expect(']', "Expected ']' at the end of located chain".to_string())?;
-
-        Ok(Self {
-            span: start..parser.pos,
-            location,
-            chain,
-        })
     }
 }

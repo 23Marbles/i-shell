@@ -33,8 +33,9 @@ impl IntoIterator for CommandChain {
 }
 
 pub struct RunningChain {
-    command_set: JoinSet<Result<CommandResult, CommandError>>,
     ouput: Option<StreamRx>,
+
+    command_set: JoinSet<Result<CommandResult, CommandError>>,
 }
 
 impl ShellHandle {

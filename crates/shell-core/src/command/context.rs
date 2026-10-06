@@ -34,7 +34,6 @@ impl CommandContext {
         self.opt_path = Some(path);
         self
     }
-
     #[must_use]
     pub fn with_stdin(mut self, stdin: StreamRx) -> Self {
         self.stdin = Some(stdin);
@@ -113,17 +112,17 @@ impl CommandContext {
             .clone()
     }
 
-    pub async fn set_current_dir(&mut self, new_path: PathBuf) {
-        match &mut self.opt_path {
-            Some(path) => *path = new_path,
-            None => self.shell_mut(|shell| shell.cwd = new_path).await,
-        }
-    }
-
     pub async fn send_stdout(&mut self, v: Vec<u8>) -> Option<Result<(), StreamSendError>> {
         Some(self.stdout.as_mut()?.send(v).await)
     }
     pub async fn send_stderr(&mut self, v: Vec<u8>) -> Option<Result<(), StreamSendError>> {
         Some(self.stderr.as_mut()?.send(v).await)
+    }
+
+    pub async fn set_current_dir(&mut self, new_path: PathBuf) {
+        match &mut self.opt_path {
+            Some(path) => *path = new_path,
+            None => self.shell_mut(|shell| shell.cwd = new_path).await,
+        }
     }
 }

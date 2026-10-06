@@ -1,7 +1,11 @@
 use std::{borrow::Cow, path::PathBuf};
 
 use rustyline::{
-    Context, Helper, completion::{Completer, Pair}, highlight::Highlighter, hint::Hinter, validate::Validator,
+    Context, Helper,
+    completion::{Completer, Pair},
+    highlight::Highlighter,
+    hint::Hinter,
+    validate::Validator,
 };
 use shell_core::command::builtin::BUILTINS;
 
@@ -24,9 +28,7 @@ impl Completer for LineHelper {
         let input = &line[..pos];
 
         // Find the beginning of the current word.
-        let start = input
-            .rfind(char::is_whitespace)
-            .unwrap_or(0);
+        let start = input.rfind(char::is_whitespace).unwrap_or(0);
 
         if start != 0 {
             return Ok((0, Vec::new()));
