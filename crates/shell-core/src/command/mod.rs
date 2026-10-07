@@ -177,7 +177,7 @@ pub mod wire {
         #[error("command `{0}` not found")]
         NotFound(String),
 
-        #[error(transparent)]
+        #[error("{0}")]
         SendError(String),
 
         #[error("{0}")]

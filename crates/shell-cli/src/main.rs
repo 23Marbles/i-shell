@@ -4,7 +4,7 @@ use std::process::ExitCode;
 
 use rustyline::{Editor, error::ReadlineError};
 use shell_core::{
-    command::{Command, CommandResult, chain::CommandChain, context::CommandContext},
+    command::{CommandResult, chain::CommandChain},
     parse::Parser,
     shell::Shell,
 };

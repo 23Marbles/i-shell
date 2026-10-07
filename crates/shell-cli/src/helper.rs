@@ -76,6 +76,28 @@ impl Completer for LineHelper {
     }
 }
 
+struct HighlighterState {
+    current_colour: &'static str,
+    is_single_quote: bool,
+    is_double_quote: bool,
+    is_command_name: bool,
+}
+
+enum HighlightCommand {
+    HighlightChar {
+        highlight: &'static str,
+        reset: &'static str,
+    },
+    ChangeColour(&'static str),
+    Continue,
+}
+
+impl HighlighterState {
+    fn advance_state(&mut self, ch: char) -> HighlightCommand {
+        HighlightCommand::Continue
+    }
+}
+
 impl Highlighter for LineHelper {
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
         let mut is_first = true;
@@ -87,6 +109,7 @@ impl Highlighter for LineHelper {
 
         for ch in line.chars() {
             match ch {
+                '|' if !q_double || !q_single => is_first = true,
                 '"' if q_double || !q_single => {
                     if q_double {
                         buf.push_str("\"\x1b[0m");
