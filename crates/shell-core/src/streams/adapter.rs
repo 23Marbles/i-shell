@@ -175,11 +175,11 @@ pub struct StreamAdapter<A: AdapterKind> {
 }
 
 impl<A: AdapterKind> StreamAdapter<A> {
-    pub fn spawn(reciever: StreamRx, sender: StreamTx) -> Self {
+    pub fn spawn(receiver: StreamRx, sender: StreamTx) -> Self {
         let cancel = CancellationToken::new();
         let cancel_cloned = cancel.clone();
 
-        let handle = tokio::task::spawn(A::task(cancel_cloned, reciever, sender));
+        let handle = tokio::task::spawn(A::task(cancel_cloned, receiver, sender));
 
         Self {
             cancel_token: cancel,

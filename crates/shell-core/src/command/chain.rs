@@ -32,19 +32,19 @@ pub struct CommandChain {
 }
 
 impl CommandChain {
-    pub fn from_empheral(empheral: token::CommandChain<'_>) -> Self {
+    pub fn from_ephemeral(ephemeral: token::CommandChain<'_>) -> Self {
         let mut this = Self::default();
 
         let mut prev = this.commands.push_mut((
-            Command::from_empheral(empheral.first_command),
+            Command::from_ephemeral(ephemeral.first_command),
             PipeKind::None,
         ));
 
-        for (pipe, cmd) in empheral.opt_commands {
+        for (pipe, cmd) in ephemeral.opt_commands {
             prev.1 = PipeKind::from_pipe(pipe);
             prev = this
                 .commands
-                .push_mut((Command::from_empheral(cmd), PipeKind::None))
+                .push_mut((Command::from_ephemeral(cmd), PipeKind::None))
         }
 
         this

@@ -50,7 +50,7 @@ impl<'a> Parser<'a> {
     fn peek(&self) -> Option<char> {
         self.source[self.pos..].chars().next()
     }
-    fn peek_past_whitspace(&self) -> Option<char> {
+    fn peek_past_whitespace(&self) -> Option<char> {
         let mut clone = self.clone();
         clone.skip_whitespace();
         clone.peek()

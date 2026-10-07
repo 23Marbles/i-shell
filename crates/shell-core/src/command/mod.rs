@@ -58,7 +58,7 @@ pub struct Args {
 }
 
 impl Args {
-    pub fn from_empheral(args: Vec<crate::parse::token::Arg<'_>>) -> Self {
+    pub fn from_ephemeral(args: Vec<crate::parse::token::Arg<'_>>) -> Self {
         Self {
             values: args.into_iter().map(|arg| arg.raw_to_string()).collect(),
         }
@@ -74,10 +74,10 @@ pub struct Command {
 }
 
 impl Command {
-    pub fn from_empheral(cmd: crate::parse::token::Command<'_>) -> Self {
+    pub fn from_ephemeral(cmd: crate::parse::token::Command<'_>) -> Self {
         Self {
             name: cmd.name.lexme.to_string(),
-            args: Args::from_empheral(cmd.args),
+            args: Args::from_ephemeral(cmd.args),
         }
     }
 

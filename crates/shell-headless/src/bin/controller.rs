@@ -83,10 +83,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         let cmd = match pipeline.first_chain {
             shell_core::parse::token::Chain::LocatedChain(_located_chain) => todo!(),
-            shell_core::parse::token::Chain::CommandChain(command_chain) => command_chain.first_command,
+            shell_core::parse::token::Chain::CommandChain(command_chain) => {
+                command_chain.first_command
+            }
         };
 
-        let cmd = Command::from_empheral(cmd);
+        let cmd = Command::from_ephemeral(cmd);
 
         match controller
             .run_cmd(cmd, Some(StreamRx::from(tokio::io::empty())), None, None)

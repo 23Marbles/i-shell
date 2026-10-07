@@ -335,7 +335,7 @@ impl<'a> ParseToken<'a> for Pipeline<'a> {
 
         let mut opt_chains = Vec::new();
 
-        while let Some(ch) = parser.peek_past_whitspace() {
+        while let Some(ch) = parser.peek_past_whitespace() {
             if ch == '|' {
                 parser.skip_whitespace();
                 let pipe = Pipe::parse_token(parser)?;
@@ -407,7 +407,7 @@ impl<'a> ParseToken<'a> for CommandChain<'a> {
 
         let mut opt_commands = Vec::new();
 
-        while let Some(ch) = parser.peek_past_whitspace() {
+        while let Some(ch) = parser.peek_past_whitespace() {
             match ch {
                 '[' | ']' => break,
                 '|' => {

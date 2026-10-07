@@ -17,9 +17,9 @@ async fn main() -> Result<ExitCode, Box<dyn Error>> {
     }?;
 
     let tcp_socket = TcpSocket::new_v4()?;
-    let tcp_strean = tcp_socket.connect(socket_addr).await?;
+    let tcp_stream = tcp_socket.connect(socket_addr).await?;
 
-    let shell = HeadlessShell::new(tcp_strean).await;
+    let shell = HeadlessShell::new(tcp_stream).await;
 
     let shell = shell.wait().await?;
 
