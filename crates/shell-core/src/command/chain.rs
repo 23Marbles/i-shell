@@ -1,7 +1,11 @@
 use tokio::task::{JoinError, JoinSet};
+use tokio_util::sync::CancellationToken;
 
 use crate::{
-    command::{Command, CommandError, CommandResult, context::CommandContext},
+    command::{
+        Command, CommandError, CommandResult, ResolvedCommand, context::CommandContext,
+        executing::RunningCommand,
+    },
     parse::token::{self, Pipe},
     shell::ShellHandle,
     streams::{StreamRx, StreamTx},
@@ -62,7 +66,34 @@ impl IntoIterator for CommandChain {
 }
 
 pub struct RunningChain {
+    cancellation_token: CancellationToken,
     command_set: JoinSet<Result<CommandResult, CommandError>>,
+}
+
+impl RunningChain {
+    pub fn new() -> Self {
+        Self {
+            cancellation_token: CancellationToken::new(),
+            command_set: JoinSet::new(),
+        }
+    }
+
+    pub fn spawn(&mut self, cmd: ResolvedCommand, ctx: CommandContext) {
+        let running =
+            RunningCommand::spawn_with_cancel(cmd, ctx, self.cancellation_token.child_token());
+        self.command_set.spawn(running.result());
+    }
+
+    pub async fn join_next(
+        &mut self,
+    ) -> Option<Result<Result<CommandResult, CommandError>, JoinError>> {
+        self.command_set.join_next().await
+    }
+
+    async fn cancel_remaining(&mut self) {
+        self.cancellation_token.cancel();
+        while self.command_set.join_next().await.is_some() {}
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -75,22 +106,31 @@ pub enum CommandSetError {
 
 impl RunningChain {
     pub async fn result(mut self) -> Result<CommandResult, CommandSetError> {
-        let mut result = None;
-
-        while let Some(res) = self.command_set.join_next().await.map(|r| Ok(r??)) {
-            if res.is_err() || matches!(res, Ok(CommandResult::Exit(_))) {
-                result = Some(res);
-                break;
+        while let Some(res) = self.command_set.join_next().await {
+            match res {
+                Ok(Ok(CommandResult::Continue)) => {}
+                Ok(Ok(exit @ CommandResult::Exit(_))) => {
+                    self.cancel_remaining().await;
+                    return Ok(exit);
+                }
+                Ok(Err(err)) => {
+                    self.cancel_remaining().await;
+                    return Err(CommandSetError::CommandErr(err));
+                }
+                Err(err) => {
+                    self.cancel_remaining().await;
+                    return Err(CommandSetError::JoinErr(err));
+                }
             }
         }
 
-        if result.is_some() {
-            self.command_set.abort_all();
+        Ok(CommandResult::Continue)
+    }
+}
 
-            while let Some(_) = self.command_set.join_next().await {}
-        }
-
-        result.unwrap_or(Ok(CommandResult::Continue))
+impl Drop for RunningChain {
+    fn drop(&mut self) {
+        self.cancellation_token.cancel();
     }
 }
 
@@ -100,9 +140,9 @@ impl ShellHandle {
         stdin: Option<StreamRx>,
         chain: CommandChain,
     ) -> Result<(RunningChain, Option<StreamRx>), CommandError> {
+        let mut running_chain = RunningChain::new();
         let mut next_stdin: Option<StreamRx> = stdin;
-
-        let mut set = JoinSet::new();
+        let mut resolved = Vec::new();
 
         for (cmd, pipe_kind) in chain.into_iter() {
             let mut ctx = CommandContext::new(self);
@@ -137,9 +177,142 @@ impl ShellHandle {
 
             let cmd = cmd.resolve(self).await?;
 
-            set.spawn(cmd.run(ctx));
+            resolved.push((cmd, ctx));
         }
 
-        Ok((RunningChain { command_set: set }, next_stdin))
+        for (cmd, ctx) in resolved {
+            running_chain.spawn(cmd, ctx);
+        }
+
+        Ok((running_chain, next_stdin))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{future, time::Duration};
+
+    use super::*;
+    use crate::command::builtin::BuiltinFuture;
+    use crate::shell::Shell;
+
+    fn args() -> crate::command::Args {
+        crate::command::Args { values: Vec::new() }
+    }
+
+    fn context() -> CommandContext {
+        let shell = Shell::default().into_handle();
+        CommandContext::new(&shell)
+    }
+
+    fn resolved(func: crate::command::builtin::BuiltinFunc) -> ResolvedCommand {
+        ResolvedCommand::Builtin {
+            name: "test".to_string(),
+            args: args(),
+            func,
+        }
+    }
+
+    fn continue_command(_: CommandContext, _: crate::command::Args) -> BuiltinFuture {
+        Box::pin(async { Ok(CommandResult::Continue) })
+    }
+
+    fn exit_command(_: CommandContext, _: crate::command::Args) -> BuiltinFuture {
+        Box::pin(async { Ok(CommandResult::Exit(7)) })
+    }
+
+    fn error_command(_: CommandContext, args: crate::command::Args) -> BuiltinFuture {
+        Box::pin(async move {
+            Err(CommandError::other(
+                "test",
+                args,
+                "expected failure".to_string(),
+            ))
+        })
+    }
+
+    fn pending_command(_: CommandContext, _: crate::command::Args) -> BuiltinFuture {
+        Box::pin(async { future::pending::<Result<CommandResult, CommandError>>().await })
+    }
+
+    fn panicking_command(_: CommandContext, _: crate::command::Args) -> BuiltinFuture {
+        Box::pin(async { panic!("expected task panic") })
+    }
+
+    #[tokio::test]
+    async fn empty_chain_returns_continue() {
+        assert!(matches!(
+            RunningChain::new().result().await,
+            Ok(CommandResult::Continue)
+        ));
+    }
+
+    #[tokio::test]
+    async fn result_waits_for_all_continue_commands() {
+        let mut chain = RunningChain::new();
+        chain.spawn(resolved(continue_command), context());
+        chain.spawn(resolved(continue_command), context());
+
+        assert!(matches!(chain.result().await, Ok(CommandResult::Continue)));
+    }
+
+    #[tokio::test]
+    async fn exit_cancels_other_commands_and_is_returned() {
+        let mut chain = RunningChain::new();
+        chain.spawn(resolved(pending_command), context());
+        chain.spawn(resolved(exit_command), context());
+
+        let result = tokio::time::timeout(Duration::from_secs(1), chain.result())
+            .await
+            .expect("the pending command should be cancelled");
+
+        assert!(matches!(result, Ok(CommandResult::Exit(7))));
+    }
+
+    #[tokio::test]
+    async fn command_error_cancels_other_commands_and_is_returned() {
+        let mut chain = RunningChain::new();
+        chain.spawn(resolved(pending_command), context());
+        chain.spawn(resolved(error_command), context());
+
+        let result = tokio::time::timeout(Duration::from_secs(1), chain.result())
+            .await
+            .expect("the pending command should be cancelled");
+
+        assert!(matches!(result, Err(CommandSetError::CommandErr(_))));
+    }
+
+    #[tokio::test]
+    async fn task_panic_cancels_other_commands_and_is_returned() {
+        let mut chain = RunningChain::new();
+        chain.spawn(resolved(pending_command), context());
+        chain.spawn(resolved(panicking_command), context());
+
+        let result = tokio::time::timeout(Duration::from_secs(1), chain.result())
+            .await
+            .expect("the pending command should be cancelled");
+
+        assert!(matches!(result, Err(CommandSetError::CommandErr(_))));
+    }
+
+    #[tokio::test]
+    async fn join_next_returns_completed_command_result() {
+        let mut chain = RunningChain::new();
+        chain.spawn(resolved(exit_command), context());
+
+        let joined = chain.join_next().await.expect("one command was spawned");
+        assert!(matches!(joined, Ok(Ok(CommandResult::Exit(7)))));
+        assert!(chain.join_next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn dropping_chain_signals_cancellation() {
+        let mut chain = RunningChain::new();
+        chain.spawn(resolved(pending_command), context());
+        let token = chain.cancellation_token.clone();
+
+        drop(chain);
+
+        assert!(token.is_cancelled());
     }
 }

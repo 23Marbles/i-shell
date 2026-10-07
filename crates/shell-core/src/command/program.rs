@@ -19,25 +19,17 @@ pub struct Program {
 
     child: AsyncGroupChild,
 
+    finished: bool,
+
     adapters: Adapters,
-
-    has_finished: bool,
-}
-
-impl Drop for Program {
-    fn drop(&mut self) {
-        if self.has_finished {
-            return;
-        }
-        if let Some(ref cancel) = self.adapters.stdin_cancel {
-            cancel.cancel();
-        }
-        let _ = self.child.start_kill();
-    }
 }
 
 impl Program {
-    pub async fn run(path: PathBuf, args: Args, ctx: CommandContext) -> Result<Self, CommandError> {
+    pub async fn spawn(
+        path: PathBuf,
+        args: Args,
+        ctx: CommandContext,
+    ) -> Result<Self, CommandError> {
         let mut command = tokio::process::Command::new(&path);
 
         command.current_dir(ctx.current_dir().await);
@@ -132,15 +124,53 @@ impl Program {
                 stdin_cancel,
                 adapter_set,
             },
-            has_finished: false,
+            finished: false,
         })
     }
 
-    pub async fn monitor(mut self) -> Result<(), CommandError> {
+    pub fn cancel(&mut self) -> std::io::Result<()> {
+        if let Some(ref cancel) = self.adapters.stdin_cancel
+            && !cancel.is_cancelled()
+        {
+            cancel.cancel();
+        };
+        self.child.start_kill()
+    }
+
+    pub async fn result(&mut self, cancel: CancellationToken) -> Result<(), CommandError> {
+        if self.finished {
+            return Err(CommandError::double_return(
+                self.path.to_string_lossy(),
+                self.args.clone(),
+            ));
+        }
+
         let mut child_status: Option<ExitStatus> = None;
 
         while child_status.is_none() || !self.adapters.adapter_set.is_empty() {
             select! {
+                _ = cancel.cancelled() => {
+                    if self.finished {
+                        return Err(CommandError::double_return(
+                            self.path.to_string_lossy(),
+                            self.args.clone(),
+                        ));
+                    }
+
+                    let _ = self.child.start_kill();
+                    self.adapters.adapter_set.abort_all();
+
+                    let _ = self.child.wait().await;
+                    while self.adapters.adapter_set.join_next().await.is_some() {}
+
+                    self.finished = true;
+
+                    return Err(CommandError::cancelled(
+                        self.path.to_string_lossy(),
+                        self.args.clone(),
+                    ));
+                }
+
                 child_res = self.child.inner().wait(),
                     if child_status.is_none() =>
                 {
@@ -158,7 +188,14 @@ impl Program {
 
                             while self.adapters.adapter_set.join_next().await.is_some() {}
 
-                            self.has_finished = true;
+                            if self.finished {
+                                return Err(CommandError::double_return(
+                                    self.path.to_string_lossy(),
+                                    self.args.clone(),
+                                ));
+                            }
+
+                            self.finished = true;
 
                             return Err(e.into_command_error(
                                 self.path.to_string_lossy(),
@@ -181,7 +218,14 @@ impl Program {
 
                             while self.adapters.adapter_set.join_next().await.is_some() {}
 
-                            self.has_finished = true;
+                            if self.finished {
+                                return Err(CommandError::double_return(
+                                    self.path.to_string_lossy(),
+                                    self.args.clone(),
+                                ));
+                            }
+
+                            self.finished = true;
 
                             return Err(e.into_command_error(
                                 self.path.to_string_lossy(),
@@ -196,7 +240,14 @@ impl Program {
 
                             while self.adapters.adapter_set.join_next().await.is_some() {}
 
-                            self.has_finished = true;
+                            if self.finished {
+                                return Err(CommandError::double_return(
+                                    self.path.to_string_lossy(),
+                                    self.args.clone(),
+                                ));
+                            }
+
+                            self.finished = true;
 
                             return Err(CommandError::adapter_err(
                                 self.path.to_string_lossy(),
@@ -214,7 +265,14 @@ impl Program {
                 e.into_command_error(self.path.to_string_lossy(), self.args.clone())
             })?;
 
-        self.has_finished = true;
+        if self.finished {
+            return Err(CommandError::double_return(
+                self.path.to_string_lossy(),
+                self.args.clone(),
+            ));
+        }
+
+        self.finished = true;
 
         if status.success() {
             Ok(())

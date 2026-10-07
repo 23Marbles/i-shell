@@ -1,9 +1,13 @@
 pub mod builtin;
 pub mod chain;
 pub mod context;
+pub mod executing;
 pub mod program;
 
 use std::{path::PathBuf, process::ExitStatus};
+
+use tokio::task::JoinError;
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     command::{builtin::BuiltinFunc, context::CommandContext, program::Program},
@@ -42,9 +46,9 @@ impl ResolvedCommand {
                 args,
                 func,
             } => (func)(ctx, args).await,
-            ResolvedCommand::Program { path, args } => Program::run(path, args, ctx)
+            ResolvedCommand::Program { path, args } => Program::spawn(path, args, ctx)
                 .await?
-                .monitor()
+                .result(CancellationToken::new())
                 .await
                 .map(|_| CommandResult::Continue),
         }
@@ -125,15 +129,15 @@ pub struct CommandError {
 }
 
 macro_rules! command_error_kinds_impl {
-    ($($func:ident -> $kind:ident($input_type:ty)),*) => {
+    ($($func:ident -> $kind:ident$(($($type_name:ident: $input_type:ty$(,)?)+))?$(,)?)*) => {
         impl CommandError {
             $(
-                pub fn $func(cmd_name: impl Into<String>, cmd_args: Args, inner: $input_type) -> Self {
+                pub fn $func(cmd_name: impl Into<String>, cmd_args: Args, $($($type_name: $input_type),+)?) -> Self {
                     Self {
                         cmd_name: cmd_name.into(),
                         cmd_args,
                         offending_arg: None,
-                        kind: CommandErrorKind::$kind(inner),
+                        kind: CommandErrorKind::$kind$(($($type_name),+))?,
                     }
                 }
             )*
@@ -142,54 +146,57 @@ macro_rules! command_error_kinds_impl {
 }
 
 command_error_kinds_impl!(
-    args -> Args(String),
-    io -> Io(std::io::Error),
-    not_found -> NotFound(String),
-    send_error -> SendError(StreamSendError),
-    recv_error -> RecvError(StreamReceiveError),
-    other -> Other(String),
-    child_exit_err -> ChildExitErr(ExitStatus),
-    adapter_err -> AdapterErr(AdapterError)
+    args -> Args(err: String),
+    io -> Io(io_err: std::io::Error),
+    not_found -> NotFound(name: String),
+    send_error -> SendError(err: StreamSendError),
+    recv_error -> RecvError(err: StreamReceiveError),
+    other -> Other(v: String),
+    child_exit_err -> ChildExitErr(status: ExitStatus),
+    adapter_err -> AdapterErr(err: AdapterError),
+    cancelled -> Cancelled,
+    join_error -> JoinErr(join_err: JoinError),
+    double_return -> DoubleReturn,
 );
 
 #[cfg(feature = "serde")]
 pub mod wire {
-    use std::fmt::Display;
-
     use super::*;
 
-    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, thiserror::Error)]
     pub enum WireCommandErrorKind {
+        #[error("{0}")]
         Io(String),
 
+        #[error("args parse error: {0}")]
         Args(String),
 
+        #[error("{0}")]
         Other(String),
 
+        #[error("command `{0}` not found")]
         NotFound(String),
 
+        #[error(transparent)]
         SendError(String),
 
+        #[error("{0}")]
         RecvError(String),
 
+        #[error("adapter failed: {0}")]
         AdapterErr(String),
 
+        #[error("{0}")]
         ChildExitErr(i32),
-    }
 
-    impl Display for WireCommandErrorKind {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            match self {
-                WireCommandErrorKind::Args(s)
-                | WireCommandErrorKind::Io(s)
-                | WireCommandErrorKind::NotFound(s)
-                | WireCommandErrorKind::SendError(s)
-                | WireCommandErrorKind::RecvError(s)
-                | WireCommandErrorKind::Other(s)
-                | WireCommandErrorKind::AdapterErr(s) => write!(f, "{s}"),
-                WireCommandErrorKind::ChildExitErr(c) => write!(f, "{c}"),
-            }
-        }
+        #[error("this task was cancelled")]
+        Cancelled,
+
+        #[error("the task this command is attached to failed: {0}")]
+        JoinErr(String),
+
+        #[error("tried to finish a task for a second time")]
+        DoubleReturn,
     }
 
     impl From<CommandErrorKind> for WireCommandErrorKind {
@@ -203,9 +210,13 @@ pub mod wire {
                 CommandErrorKind::Other(e) => Self::Other(e),
                 CommandErrorKind::ChildExitErr(e) => Self::ChildExitErr(e.code().unwrap_or(-1)),
                 CommandErrorKind::AdapterErr(e) => Self::AdapterErr(e.to_string()),
+                CommandErrorKind::Cancelled => Self::Cancelled,
+                CommandErrorKind::JoinErr(join_error) => Self::JoinErr(join_error.to_string()),
+                CommandErrorKind::DoubleReturn => Self::DoubleReturn,
             }
         }
     }
+
     #[derive(Debug, thiserror::Error, serde::Serialize, serde::Deserialize)]
     #[error(
     "{cmd_name}: {}{kind}",
@@ -254,6 +265,7 @@ pub mod wire {
         }
     }
 }
+
 pub trait IntoCommandError {
     fn into_command_error(self, cmd_name: impl Into<String>, args: Args) -> CommandError;
 }
@@ -294,4 +306,13 @@ pub enum CommandErrorKind {
 
     #[error("{0}")]
     ChildExitErr(ExitStatus),
+
+    #[error("this command was cancelled")]
+    Cancelled,
+
+    #[error("the task this command is attached to failed: {0}")]
+    JoinErr(#[from] JoinError),
+
+    #[error("tried to finish a task for a second time")]
+    DoubleReturn,
 }
