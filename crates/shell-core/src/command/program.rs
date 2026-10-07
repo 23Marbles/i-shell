@@ -3,10 +3,8 @@ use std::{
     process::{ExitStatus, Stdio},
 };
 
-use tokio::{
-    select,
-    task::{JoinHandle, JoinSet},
-};
+use command_group::{AsyncCommandGroup, AsyncGroupChild};
+use tokio::{select, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -19,9 +17,23 @@ pub struct Program {
 
     args: Args,
 
-    child: tokio::process::Child,
+    child: AsyncGroupChild,
 
     adapters: Adapters,
+
+    has_finished: bool,
+}
+
+impl Drop for Program {
+    fn drop(&mut self) {
+        if self.has_finished {
+            return;
+        }
+        if let Some(ref cancel) = self.adapters.stdin_cancel {
+            cancel.cancel();
+        }
+        let _ = self.child.start_kill();
+    }
 }
 
 impl Program {
@@ -55,40 +67,56 @@ impl Program {
             false
         };
 
-        let mut child = match command.spawn() {
+        let mut child = match command.group_spawn() {
             Ok(t) => t,
             Err(e) => return Err(CommandError::io(path.to_string_lossy(), args, e)),
         };
 
+        let mut adapter_set = JoinSet::new();
+
         let mut stdin_cancel = None;
-        let stdin_adapter = has_stdin_adapter.then(|| {
-            let stdin = child.stdin.take().expect("Just set the stdin as piped");
+        has_stdin_adapter.then(|| {
+            let stdin = child
+                .inner()
+                .stdin
+                .take()
+                .expect("Just set the stdin as piped");
             let cancel = CancellationToken::new();
             let task_cancel = cancel.clone();
             let mut stream = ctx.stdin.unwrap();
             stdin_cancel = Some(cancel);
 
-            tokio::spawn(async move {
+            adapter_set.spawn(async move {
                 stream
                     .copy_to(stdin, task_cancel)
                     .await
                     .map_err(AdapterError::from)
             })
         });
-        let stdout_adapter = has_stdout_adapter.then(|| {
-            let stdout = child.stdout.take().expect("Just set the stdout as piped");
+        has_stdout_adapter.then(|| {
+            let stdout = child
+                .inner()
+                .stdout
+                .take()
+                .expect("Just set the stdout as piped");
             let mut stream = ctx.stdout.unwrap();
-            tokio::spawn(async move {
+
+            adapter_set.spawn(async move {
                 stream
                     .send_reader(stdout, CancellationToken::new())
                     .await
                     .map_err(AdapterError::from)
             })
         });
-        let stderr_adapter = has_stderr_adapter.then(|| {
-            let stderr = child.stderr.take().expect("Just set the stderr as piped");
+        has_stderr_adapter.then(|| {
+            let stderr = child
+                .inner()
+                .stderr
+                .take()
+                .expect("Just set the stderr as piped");
             let mut stream = ctx.stderr.unwrap();
-            tokio::spawn(async move {
+
+            adapter_set.spawn(async move {
                 stream
                     .send_reader(stderr, CancellationToken::new())
                     .await
@@ -101,94 +129,78 @@ impl Program {
             args,
             child,
             adapters: Adapters {
-                stdout_adapter,
-                stderr_adapter,
-                stdin_adapter,
                 stdin_cancel,
+                adapter_set,
             },
+            has_finished: false,
         })
     }
 
     pub async fn monitor(mut self) -> Result<(), CommandError> {
-        let mut adapter_tasks: JoinSet<Result<(), AdapterError>> = tokio::task::JoinSet::new();
-
-        let Adapters {
-            stdout_adapter,
-            stderr_adapter,
-            stdin_adapter,
-            stdin_cancel,
-        } = self.adapters;
-
-        let adapter_handles = [stdout_adapter, stderr_adapter, stdin_adapter];
-
-        for handle in adapter_handles.into_iter().flatten() {
-            adapter_tasks.spawn(async move {
-                handle.await??;
-                Ok(())
-            });
-        }
-
         let mut child_status: Option<ExitStatus> = None;
 
-        while child_status.is_none() || !adapter_tasks.is_empty() {
+        while child_status.is_none() || !self.adapters.adapter_set.is_empty() {
             select! {
-                child_res = self.child.wait(),
+                child_res = self.child.inner().wait(),
                     if child_status.is_none() =>
                 {
                     match child_res {
                         Ok(status) => {
                             child_status = Some(status);
-                            if let Some(cancel) = &stdin_cancel {
+                            if let Some(cancel) = &self.adapters.stdin_cancel {
                                 cancel.cancel();
                             }
                         }
                         Err(e) => {
-                            adapter_tasks.abort_all();
+                            self.adapters.adapter_set.abort_all();
+                            let _ = self.child.start_kill();
+                            let _ = self.child.wait().await;
 
-                            while adapter_tasks.join_next().await.is_some() {}
+                            while self.adapters.adapter_set.join_next().await.is_some() {}
+
+                            self.has_finished = true;
 
                             return Err(e.into_command_error(
                                 self.path.to_string_lossy(),
-                                self.args,
+                                self.args.clone(),
                             ));
                         }
                     }
                 }
 
-                Some(result) = adapter_tasks.join_next(),
-                    if !adapter_tasks.is_empty() =>
+                Some(result) = self.adapters.adapter_set.join_next(),
+                    if !self.adapters.adapter_set.is_empty() =>
                 {
                     match result {
-                        Ok(Ok(())) => {
-                            // This adapter completed.
-                            // Continue monitoring the remaining tasks.
-                        }
+                        Ok(Ok(())) => {}
 
                         Ok(Err(e)) => {
-                            adapter_tasks.abort_all();
-
+                            self.adapters.adapter_set.abort_all();
                             let _ = self.child.start_kill();
                             let _ = self.child.wait().await;
 
-                            while adapter_tasks.join_next().await.is_some() {}
+                            while self.adapters.adapter_set.join_next().await.is_some() {}
+
+                            self.has_finished = true;
 
                             return Err(e.into_command_error(
                                 self.path.to_string_lossy(),
-                                self.args,
+                                self.args.clone(),
                             ));
                         }
 
                         Err(e) => {
-                            adapter_tasks.abort_all();
-
+                            self.adapters.adapter_set.abort_all();
                             let _ = self.child.start_kill();
                             let _ = self.child.wait().await;
 
-                            while adapter_tasks.join_next().await.is_some() {}
+                            while self.adapters.adapter_set.join_next().await.is_some() {}
+
+                            self.has_finished = true;
 
                             return Err(CommandError::adapter_err(
                                 self.path.to_string_lossy(),
-                                self.args,
+                                self.args.clone(),
                                 e.into(),
                             ));
                         }
@@ -197,15 +209,19 @@ impl Program {
             }
         }
 
-        // While branch would not have completed if it was None
-        let status = child_status.unwrap();
+        let status =
+            self.child.wait().await.map_err(|e| {
+                e.into_command_error(self.path.to_string_lossy(), self.args.clone())
+            })?;
+
+        self.has_finished = true;
 
         if status.success() {
             Ok(())
         } else {
             Err(CommandError::child_exit_err(
                 self.path.to_string_lossy(),
-                self.args,
+                self.args.clone(),
                 status,
             ))
         }
@@ -213,9 +229,5 @@ impl Program {
 }
 pub struct Adapters {
     stdin_cancel: Option<CancellationToken>,
-    stdin_adapter: Option<JoinHandle<Result<(), AdapterError>>>,
-
-    stdout_adapter: Option<JoinHandle<Result<(), AdapterError>>>,
-
-    stderr_adapter: Option<JoinHandle<Result<(), AdapterError>>>,
+    adapter_set: JoinSet<Result<(), AdapterError>>,
 }

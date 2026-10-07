@@ -1,7 +1,8 @@
-use tokio::task::JoinSet;
+use tokio::task::{JoinError, JoinSet};
 
 use crate::{
     command::{Command, CommandError, CommandResult, context::CommandContext},
+    parse::token::{self, Pipe},
     shell::ShellHandle,
     streams::{StreamRx, StreamTx},
 };
@@ -18,8 +19,36 @@ pub enum PipeKind {
     None,
 }
 
+impl PipeKind {
+    pub fn from_pipe(pipe: Pipe) -> Self {
+        let _ = pipe;
+        Self::Out
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct CommandChain {
     commands: Vec<(Command, PipeKind)>,
+}
+
+impl CommandChain {
+    pub fn from_empheral(empheral: token::CommandChain<'_>) -> Self {
+        let mut this = Self::default();
+
+        let mut prev = this.commands.push_mut((
+            Command::from_empheral(empheral.first_command),
+            PipeKind::None,
+        ));
+
+        for (pipe, cmd) in empheral.opt_commands {
+            prev.1 = PipeKind::from_pipe(pipe);
+            prev = this
+                .commands
+                .push_mut((Command::from_empheral(cmd), PipeKind::None))
+        }
+
+        this
+    }
 }
 
 impl IntoIterator for CommandChain {
@@ -33,9 +62,36 @@ impl IntoIterator for CommandChain {
 }
 
 pub struct RunningChain {
-    ouput: Option<StreamRx>,
-
     command_set: JoinSet<Result<CommandResult, CommandError>>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum CommandSetError {
+    #[error(transparent)]
+    JoinErr(#[from] JoinError),
+    #[error(transparent)]
+    CommandErr(#[from] CommandError),
+}
+
+impl RunningChain {
+    pub async fn result(mut self) -> Result<CommandResult, CommandSetError> {
+        let mut result = None;
+
+        while let Some(res) = self.command_set.join_next().await.map(|r| Ok(r??)) {
+            if res.is_err() || matches!(res, Ok(CommandResult::Exit(_))) {
+                result = Some(res);
+                break;
+            }
+        }
+
+        if result.is_some() {
+            self.command_set.abort_all();
+
+            while let Some(_) = self.command_set.join_next().await {}
+        }
+
+        result.unwrap_or(Ok(CommandResult::Continue))
+    }
 }
 
 impl ShellHandle {
@@ -43,13 +99,17 @@ impl ShellHandle {
         &self,
         stdin: Option<StreamRx>,
         chain: CommandChain,
-    ) -> Result<RunningChain, CommandError> {
+    ) -> Result<(RunningChain, Option<StreamRx>), CommandError> {
         let mut next_stdin: Option<StreamRx> = stdin;
 
         let mut set = JoinSet::new();
 
         for (cmd, pipe_kind) in chain.into_iter() {
             let mut ctx = CommandContext::new(self);
+
+            if let Some(stdin) = next_stdin {
+                ctx = ctx.with_stdin(stdin);
+            }
 
             next_stdin = match pipe_kind {
                 PipeKind::Err => {
@@ -80,9 +140,6 @@ impl ShellHandle {
             set.spawn(cmd.run(ctx));
         }
 
-        Ok(RunningChain {
-            command_set: set,
-            ouput: next_stdin,
-        })
+        Ok((RunningChain { command_set: set }, next_stdin))
     }
 }

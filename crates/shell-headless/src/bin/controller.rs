@@ -81,7 +81,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
         };
 
-        let cmd = pipeline.first_command;
+        let cmd = match pipeline.first_chain {
+            shell_core::parse::token::Chain::LocatedChain(_located_chain) => todo!(),
+            shell_core::parse::token::Chain::CommandChain(command_chain) => command_chain.first_command,
+        };
 
         let cmd = Command::from_empheral(cmd);
 

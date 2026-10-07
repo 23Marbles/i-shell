@@ -7,6 +7,7 @@ edition = "2024"
 async-trait = "0.1.92"
 bitflags = "2.13.2"
 bytes = "1.12.1"
+command-group = { version = "5.0.1", features = ["with-tokio"] }
 pathsearch = "0.2.0"
 serde = { version = "1.0.229", optional = true, features = ["derive"] }
 thiserror = "2.0.21"

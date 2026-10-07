@@ -4,9 +4,7 @@ use std::process::ExitCode;
 
 use rustyline::{Editor, error::ReadlineError};
 use shell_core::{
-    command::{Command, CommandResult, context::CommandContext},
-    parse::Parser,
-    shell::Shell,
+    command::{Command, CommandResult, chain::CommandChain, context::CommandContext}, parse::Parser, shell::Shell,
 };
 
 use crate::helper::LineHelper;
@@ -61,21 +59,22 @@ async fn main() -> Result<ExitCode, ReadlineError> {
             }
         };
 
-        let cmd = pipeline.first_command;
+        let chain = pipeline.first_chain;
 
-        let cmd = Command::from_empheral(cmd);
+        let chain = CommandChain::from_empheral(match chain {
+            shell_core::parse::token::Chain::LocatedChain(_located_chain) => todo!(),
+            shell_core::parse::token::Chain::CommandChain(command_chain) => command_chain,
+        });
 
-        let cmd = match cmd.resolve(&shell_handle).await {
+        let spawned_chain = match shell_handle.spawn_chain(None, chain).await {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("{e}");
                 continue;
             }
-        };
+        }.0;
 
-        let ctx = CommandContext::new(&shell_handle);
-
-        match cmd.run(ctx).await {
+        match spawned_chain.result().await {
             Ok(CommandResult::Continue) => (),
             Ok(CommandResult::Exit(c)) => return Ok(ExitCode::from(c)),
             Err(e) => eprintln!("{e}"),
