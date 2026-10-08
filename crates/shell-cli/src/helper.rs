@@ -1,5 +1,6 @@
-use std::{borrow::Cow, path::PathBuf};
+use std::{borrow::Cow, fmt::Write, path::PathBuf};
 
+use anstyle::{AnsiColor, Color, Style};
 use rustyline::{
     Context, Helper,
     completion::{Completer, Pair},
@@ -76,76 +77,136 @@ impl Completer for LineHelper {
     }
 }
 
+#[derive(Debug, Default)]
 struct HighlighterState {
-    current_colour: &'static str,
+    current_colour: Style,
     is_single_quote: bool,
     is_double_quote: bool,
-    is_command_name: bool,
+    // None = Not currently expected
+    // Some(false) = Expected but not encountered;
+    // Some(true) = Expected and encountered;
+    is_command_name: Option<bool>,
+    bracket_depth: usize,
 }
 
 enum HighlightCommand {
-    HighlightChar {
-        highlight: &'static str,
-        reset: &'static str,
-    },
-    ChangeColour(&'static str),
+    HighlightChar { highlight: Style, reset: Style },
+    ChangeColour(Style),
+    Reset,
+    ResetAfter,
     Continue,
 }
 
 impl HighlighterState {
+    const FIRST_COMMAND: Style = Style::new().fg_color(Some(Color::Ansi(AnsiColor::Yellow)));
+    const QUOTE: Style = Style::new().fg_color(Some(Color::Ansi(AnsiColor::Green)));
+    const OPTIONAL_ARG: Style = Style::new().dimmed();
+    const PIPE_COLOUR: Style = Style::new();
+
+    fn begin() -> Self {
+        let mut this = Self::default();
+        this.start_new_command();
+        this
+    }
+
+    fn start_new_command(&mut self) -> Style {
+        self.is_command_name = Some(false);
+        self.current_colour = Self::FIRST_COMMAND;
+        Self::FIRST_COMMAND
+    }
+
+    fn change_colour(&mut self, colour: Style) -> Style {
+        self.current_colour = colour;
+        colour
+    }
+
     fn advance_state(&mut self, ch: char) -> HighlightCommand {
-        HighlightCommand::Continue
+        match ch {
+            '|' if !self.is_double_quote || !self.is_single_quote => {
+                HighlightCommand::HighlightChar {
+                    highlight: Self::PIPE_COLOUR,
+                    reset: self.start_new_command(),
+                }
+            }
+            '"' if self.is_double_quote || !self.is_single_quote => {
+                if self.is_double_quote {
+                    self.is_double_quote = false;
+                    HighlightCommand::ResetAfter
+                } else {
+                    self.is_double_quote = true;
+                    HighlightCommand::ChangeColour(Self::QUOTE)
+                }
+            }
+            '\'' if self.is_single_quote || !self.is_double_quote => {
+                if self.is_single_quote {
+                    self.is_single_quote = false;
+                    HighlightCommand::ResetAfter
+                } else {
+                    self.is_single_quote = true;
+                    HighlightCommand::ChangeColour(Self::QUOTE)
+                }
+            }
+            '-' if !self.is_double_quote
+                && !self.is_single_quote
+                && !self.is_command_name.is_some() =>
+            {
+                HighlightCommand::ChangeColour(self.change_colour(Self::OPTIONAL_ARG))
+            }
+            w if w.is_whitespace()
+                && !self.is_double_quote
+                && !self.is_single_quote
+                && self.is_command_name != Some(false) =>
+            {
+                self.is_command_name = None;
+                HighlightCommand::Reset
+            }
+            _ => {
+                if let Some(encountered) = &mut self.is_command_name {
+                    *encountered = true
+                };
+                HighlightCommand::Continue
+            }
+        }
     }
 }
 
 impl Highlighter for LineHelper {
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
-        let mut is_first = true;
-        let mut q_single = false;
-        let mut q_double = false;
-        let mut optional_arg = false;
+        let mut state = HighlighterState::begin();
 
-        let mut buf = "\x1b[33m".to_string();
+        const RESET: &str = "\x1b[0m";
+
+        let mut buf = state.current_colour.to_string();
 
         for ch in line.chars() {
-            match ch {
-                '|' if !q_double || !q_single => is_first = true,
-                '"' if q_double || !q_single => {
-                    if q_double {
-                        buf.push_str("\"\x1b[0m");
-                        q_double = false;
-                        continue;
-                    } else {
-                        buf.push_str("\x1b[32m");
-                        q_double = true
-                    }
+            match state.advance_state(ch) {
+                HighlightCommand::HighlightChar { highlight, reset } => {
+                    buf.push_str(RESET);
+                    let _ = write!(buf, "{}", highlight);
+                    buf.push(ch);
+                    buf.push_str(RESET);
+                    let _ = write!(buf, "{}", reset);
                 }
-                '\'' if q_single || !q_double => {
-                    if q_single {
-                        buf.push_str("'\x1b[0m");
-                        q_single = false;
-                        continue;
-                    } else {
-                        buf.push_str("\x1b[32m");
-                        q_single = true
-                    }
+                HighlightCommand::ChangeColour(style) => {
+                    buf.push_str(RESET);
+                    let _ = write!(buf, "{}", style);
+                    buf.push(ch);
                 }
-                '-' if !q_double && !q_single && !is_first => {
-                    optional_arg = true;
-                    buf.push_str("\x1b[2m");
+                HighlightCommand::Reset => {
+                    buf.push_str(RESET);
+                    buf.push(ch);
                 }
-                ' ' if !q_double && !q_single && (is_first || optional_arg) => {
-                    buf.push_str("\x1b[0m");
-                    is_first = false;
-                    optional_arg = false;
+                HighlightCommand::ResetAfter => {
+                    buf.push(ch);
+                    buf.push_str(RESET);
                 }
-                _ => (),
-            };
-
-            buf.push(ch);
+                HighlightCommand::Continue => {
+                    buf.push(ch);
+                }
+            }
         }
 
-        buf.push_str("\x1b[0m");
+        buf.push_str(RESET);
 
         Cow::Owned(buf)
     }
